@@ -23,6 +23,7 @@ import com.rtbishop.look4sat.core.domain.predict.CelestialComputer
 import com.rtbishop.look4sat.core.domain.predict.OrbitalPass
 import com.rtbishop.look4sat.core.domain.predict.OrbitalPos
 import com.rtbishop.look4sat.core.domain.sstv.SstvFrame
+import com.rtbishop.look4sat.core.domain.sstv.SstvQualityMetrics
 
 data class RadioPanelState(
     val label: String = "",
@@ -58,11 +59,13 @@ data class RadarState(
     val satTrack: List<OrbitalPos> = emptyList(),
     val shouldShowSweep: Boolean = false,
     val shouldUseCompass: Boolean = false,
+    val shouldFlipRadar: Boolean = false,
     val sunPosition: CelestialComputer.SunPosition? = null,
     val moonPosition: CelestialComputer.MoonPosition? = null,
     val transceivers: TransceiverSubState = TransceiverSubState(),
     val radioControl: RadioControlSubState = RadioControlSubState(),
-    val sstv: SstvSubState = SstvSubState()
+    val sstv: SstvSubState = SstvSubState(),
+    val calculatorOffsetKHz: String = ""
 )
 
 enum class SstvStatus { Idle, Recording }
@@ -76,7 +79,8 @@ data class SstvSubState(
     val currentFrame: SstvFrame? = null,
     val selectedAudioSource: AudioSource = AudioSource.Mic,
     val audioSourceError: String? = null,
-    val needsMediaProjection: Boolean = false
+    val needsMediaProjection: Boolean = false,
+    val diagnosticsMetrics: SstvQualityMetrics? = null
 )
 
 sealed interface RadarAction {
@@ -100,4 +104,7 @@ sealed interface RadarAction {
     data class SstvSelectAudioSource(val source: AudioSource) : RadarAction
     data class SstvPermissionResult(val granted: Boolean) : RadarAction
     data class SstvMediaProjectionGranted(val token: Any?) : RadarAction
+
+    // Calculator actions
+    data class ChangeCalculatorOffset(val offsetKHz: String) : RadarAction
 }

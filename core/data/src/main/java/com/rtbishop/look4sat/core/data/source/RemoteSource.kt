@@ -20,11 +20,11 @@ package com.rtbishop.look4sat.core.data.source
 import android.content.ContentResolver
 import androidx.core.net.toUri
 import com.rtbishop.look4sat.core.domain.source.IRemoteSource
+import com.rtbishop.look4sat.core.domain.source.NetworkResult
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.io.ByteArrayInputStream
 import java.io.InputStream
 
 class RemoteSource(
@@ -43,15 +43,57 @@ class RemoteSource(
         }
     }
 
-    override suspend fun getNetworkStream(url: String): InputStream? = withContext(dispatcher) {
+    override suspend fun getNetworkStream(url: String): NetworkResult = withContext(dispatcher) {
         try {
             val networkRequest = Request.Builder().url(url).build()
-            httpClient.newCall(networkRequest).execute().use { response ->
-                if (!response.isSuccessful) return@withContext null
-                ByteArrayInputStream(response.body.bytes())
+            val response = httpClient.newCall(networkRequest).execute()
+            if (!response.isSuccessful) {
+                val code = response.code
+                response.close()
+                return@withContext NetworkResult(code, null)
             }
+            // Return the body stream directly as the caller is responsible for closing it
+            // That returns the connection to OkHttp's pool
+            val body = response.body
+            if (body == null) {
+                response.close()
+                return@withContext NetworkResult(response.code, null)
+            }
+            NetworkResult(response.code, body.byteStream().buffered())
         } catch (exception: Exception) {
             println("RemoteSource network stream exception: $exception")
+            NetworkResult(NetworkResult.CONNECTION_ERROR, null)
+        }
+    }
+
+    override suspend fun getAmSatCatalog(): String? = withContext(dispatcher) {
+        try {
+            val request = Request.Builder()
+                .url("https://www.amsat.org/status/api/v1/catalog.php")
+                .header("User-Agent", "Look4Sat")
+                .build()
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@use null
+                response.body.string()
+            }
+        } catch (exception: Exception) {
+            println("RemoteSource getAmSatCatalog exception: $exception")
+            null
+        }
+    }
+
+    override suspend fun getAmSatReports(hours: Int, limit: Int): String? = withContext(dispatcher) {
+        try {
+            val request = Request.Builder()
+                .url("https://www.amsat.org/status/api/v1/reports.php?hours=$hours&limit=$limit")
+                .header("User-Agent", "Look4Sat")
+                .build()
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@use null
+                response.body.string()
+            }
+        } catch (exception: Exception) {
+            println("RemoteSource getAmSatReports exception: $exception")
             null
         }
     }

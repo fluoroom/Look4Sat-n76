@@ -25,10 +25,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -38,6 +40,7 @@ import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -61,6 +64,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.rtbishop.look4sat.core.domain.model.DataSourcesSettings
 import com.rtbishop.look4sat.core.domain.model.OtherSettings
 import com.rtbishop.look4sat.core.domain.predict.GeoPos
 import com.rtbishop.look4sat.core.domain.repository.IContainerProvider
@@ -71,6 +75,7 @@ import com.rtbishop.look4sat.core.presentation.PrimaryIconCard
 import com.rtbishop.look4sat.core.presentation.R
 import com.rtbishop.look4sat.core.presentation.ScreenColumn
 import com.rtbishop.look4sat.core.presentation.TopBar
+import com.rtbishop.look4sat.core.presentation.WhatsNewDialog
 import com.rtbishop.look4sat.core.presentation.infiniteMarquee
 import com.rtbishop.look4sat.core.presentation.isVerticalLayout
 import java.text.SimpleDateFormat
@@ -113,23 +118,23 @@ private fun SettingsScreen(uiState: SettingsState, onAction: (SettingsAction) ->
     }
     if (dialogs.dataSources) {
         DataSourcesDialog(
-            useCustomTle = uiState.dataSourcesSettings.useCustomTLE,
-            useCustomTransceivers = uiState.dataSourcesSettings.useCustomTransceivers,
-            tleUrl = uiState.dataSourcesSettings.tleUrl,
-            transceiversUrl = uiState.dataSourcesSettings.transceiversUrl,
+            satelliteUrls = uiState.dataSourcesSettings.satelliteUrls,
+            transceiversUrls = uiState.dataSourcesSettings.transceiversUrls,
+            satelliteEnabled = uiState.dataSourcesSettings.satelliteEnabled,
+            transceiversEnabled = uiState.dataSourcesSettings.transceiversEnabled,
+            statusCodes = uiState.dataSourcesStatus,
             onImportTle = { permissions.launchTleImport(); dialogs.dataSources = false },
             onImportTransceivers = { permissions.launchTransceiverImport(); dialogs.dataSources = false },
             onDismiss = { dialogs.dataSources = false },
-            onSave = { useCustomTle, useCustomTransceivers, tleUrl, transceiversUrl ->
-                val current = uiState.dataSourcesSettings
-                val newSettings = current.copy(
-                    useCustomTLE = if (!useCustomTle || tleUrl.isNotBlank()) useCustomTle else current.useCustomTLE,
-                    tleUrl = if (!useCustomTle || tleUrl.isNotBlank()) tleUrl else current.tleUrl,
-                    useCustomTransceivers = if (!useCustomTransceivers || transceiversUrl.isNotBlank()) useCustomTransceivers else current.useCustomTransceivers,
-                    transceiversUrl = if (!useCustomTransceivers || transceiversUrl.isNotBlank()) transceiversUrl else current.transceiversUrl
+            onSave = { satUrls, txUrls, satEnabled, txEnabled ->
+                val newSettings = DataSourcesSettings(
+                    satelliteUrls = satUrls,
+                    transceiversUrls = txUrls,
+                    satelliteEnabled = satEnabled,
+                    transceiversEnabled = txEnabled
                 )
-                if (newSettings != current) onAction(SettingsAction.UpdateDataSources(newSettings))
-                if (useCustomTle || useCustomTransceivers) onAction(SettingsAction.UpdateFromWeb)
+                if (newSettings != uiState.dataSourcesSettings) onAction(SettingsAction.UpdateDataSources(newSettings))
+                onAction(SettingsAction.UpdateFromWeb)
             }
         )
     }
@@ -137,14 +142,15 @@ private fun SettingsScreen(uiState: SettingsState, onAction: (SettingsAction) ->
         NetworkOutputDialog(
             initialSettings = uiState.rcSettings,
             onDismiss = { dialogs.network = false },
-            onSave = { rotState, rotAddr, rotPort, rotFmt, freqState, freqAddr, freqPort, freqFmt ->
+            onSave = { rotState, rotAddr, rotPort, rotFmt, freqState, freqAddr, freqPort, freqFmt, freqOffsetHz ->
                 onAction(
                     SettingsAction.UpdateRC(
                         uiState.rcSettings.copy(
                             rotatorState = rotState, rotatorAddress = rotAddr,
                             rotatorPort = rotPort, rotatorFormat = rotFmt,
                             frequencyState = freqState, frequencyAddress = freqAddr,
-                            frequencyPort = freqPort, frequencyFormat = freqFmt
+                            frequencyPort = freqPort, frequencyFormat = freqFmt,
+                            frequencyOffsetHz = freqOffsetHz
                         )
                     )
                 )
@@ -171,9 +177,13 @@ private fun SettingsScreen(uiState: SettingsState, onAction: (SettingsAction) ->
     if (dialogs.radioControl) {
         RadioControlDialog(
             initialSettings = uiState.radioControlSettings,
+            pairedBluetoothDevices = uiState.pairedBluetoothDevices,
             onDismiss = { dialogs.radioControl = false },
             onSave = { onAction(SettingsAction.UpdateRadioControl(it)) }
         )
+    }
+    if (dialogs.whatsNew) {
+        WhatsNewDialog(onDismiss = { dialogs.whatsNew = false })
     }
 
     // URLs for top bar
@@ -195,11 +205,11 @@ private fun SettingsScreen(uiState: SettingsState, onAction: (SettingsAction) ->
             if (isVerticalLayout) {
                 TopBar {
                     TopCard(
-                        onClick = { safeOpenUri(appUrl) },
+                        onClick = { dialogs.whatsNew = true },
                         version = uiState.appVersionName,
                         modifier = Modifier.weight(1f)
                     )
-                    PrimaryIconCard(onClick = { safeOpenUri(donateUrl) }, resId = R.drawable.ic_pound)
+                    PrimaryIconCard(onClick = { safeOpenUri(donateUrl) }, resId = R.drawable.ic_like)
                 }
                 TopBar {
                     Row(modifier = Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -221,9 +231,9 @@ private fun SettingsScreen(uiState: SettingsState, onAction: (SettingsAction) ->
                 }
             } else {
                 TopBar {
-                    PrimaryIconCard(onClick = { safeOpenUri(donateUrl) }, resId = R.drawable.ic_pound)
+                    PrimaryIconCard(onClick = { safeOpenUri(donateUrl) }, resId = R.drawable.ic_like)
                     TopCard(
-                        onClick = { safeOpenUri(appUrl) },
+                        onClick = { dialogs.whatsNew = true },
                         version = uiState.appVersionName,
                         modifier = Modifier.weight(1f)
                     )
@@ -279,8 +289,22 @@ private fun SettingsScreen(uiState: SettingsState, onAction: (SettingsAction) ->
                     onRadioControlClick = { dialogs.radioControl = true }
                 )
             }
-            item { OtherCard(uiState.otherSettings, onAction) }
-            item { CardCredits() }
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                if (isVerticalLayout) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OtherCard(uiState.otherSettings, onAction)
+                        CardCredits()
+                    }
+                } else {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)
+                    ) {
+                        OtherCard(uiState.otherSettings, onAction, modifier = Modifier.weight(1f).fillMaxHeight())
+                        CardCredits(modifier = Modifier.weight(1f).fillMaxHeight())
+                    }
+                }
+            }
         }
     }
 }
@@ -357,7 +381,7 @@ private fun LocationCard(
 @Composable
 private fun DataCardPreview() = MainTheme {
     val settings = DataSettings(true, 5000, 2500, 0L)
-    DataCard(settings = settings, {}, {}, {})
+    DataCard(settings = settings, updateFromWeb = {}, clearAllData = {}, showDataSourcesDialog = {})
 }
 
 @Composable
@@ -459,38 +483,81 @@ private fun OtherCardPreview() = MainTheme {
         shouldSeeWarning = false,
         shouldSeeWhatsNew = false
     )
-    OtherCard(settings = values) {}
+    OtherCard(settings = values, onAction = {})
 }
 
 @Composable
-private fun OtherCard(settings: OtherSettings, onAction: (SettingsAction) -> Unit) {
-    ElevatedCard(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(268.dp)
-    ) {
+private fun OtherCard(settings: OtherSettings, onAction: (SettingsAction) -> Unit, modifier: Modifier = Modifier) {
+    ElevatedCard(modifier = modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
             Text(
                 text = stringResource(id = R.string.prefs_other_title),
                 color = MaterialTheme.colorScheme.primary
             )
-            SwitchRow(R.string.prefs_other_switch_utc, settings.stateOfUtc) {
-                onAction(SettingsAction.ToggleUtc(it))
+            Spacer(modifier = Modifier.height(4.dp))
+            // Display preferences: UTC clock + night filter
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SwitchTile(R.string.prefs_other_switch_utc, settings.stateOfUtc) {
+                    onAction(SettingsAction.ToggleUtc(it))
+                }
+                SwitchTile(R.string.prefs_other_switch_night_mode, settings.stateOfNightMode) {
+                    onAction(SettingsAction.ToggleNightMode(it))
+                }
             }
+            Spacer(modifier = Modifier.height(4.dp))
+            // Radar behavior: sweep animation + sensor control
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SwitchTile(R.string.prefs_other_switch_sweep, settings.stateOfSweep) {
+                    onAction(SettingsAction.ToggleSweep(it))
+                }
+                SwitchTile(R.string.prefs_other_switch_sensors, settings.stateOfSensors) {
+                    onAction(SettingsAction.ToggleSensor(it))
+                }
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            // Data management (full width)
             SwitchRow(R.string.prefs_other_switch_update, settings.stateOfAutoUpdate) {
                 onAction(SettingsAction.ToggleUpdate(it))
             }
-            SwitchRow(R.string.prefs_other_switch_sweep, settings.stateOfSweep) {
-                onAction(SettingsAction.ToggleSweep(it))
-            }
-            SwitchRow(R.string.prefs_other_switch_sensors, settings.stateOfSensors) {
-                onAction(SettingsAction.ToggleSensor(it))
-            }
-            SwitchRow(R.string.prefs_other_switch_night_mode, settings.stateOfNightMode) {
-                onAction(SettingsAction.ToggleNightMode(it))
-            }
+            Spacer(modifier = Modifier.height(4.dp))
+            // Compass calibration sliders at the bottom
+            CompassOffsetRow(
+                labelResId = R.string.prefs_other_compass_offset,
+                value = settings.radarCompassOffset,
+                range = -180f..180f
+            ) { onAction(SettingsAction.SetRadarCompassOffset(it)) }
+            Spacer(modifier = Modifier.height(4.dp))
+            CompassOffsetRow(
+                labelResId = R.string.prefs_other_compass_offset_elev,
+                value = settings.radarCompassOffsetElev,
+                range = -90f..90f
+            ) { onAction(SettingsAction.SetRadarCompassOffsetElev(it)) }
+            Spacer(modifier = Modifier.height(4.dp))
         }
     }
+}
+
+@Composable
+private fun CompassOffsetRow(
+    labelResId: Int,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    onValueChange: (Float) -> Unit
+) {
+    Row(
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(text = stringResource(id = labelResId))
+        Text(text = "${value.toInt()}°")
+    }
+    Spacer(modifier = Modifier.height(4.dp))
+    Slider(
+        value = value,
+        onValueChange = onValueChange,
+        valueRange = range
+    )
 }
 
 @Composable
@@ -501,6 +568,21 @@ private fun SwitchRow(labelResId: Int, checked: Boolean, onCheckedChange: (Boole
         modifier = Modifier.fillMaxWidth()
     ) {
         Text(text = stringResource(id = labelResId))
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+@Composable
+private fun RowScope.SwitchTile(labelResId: Int, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.weight(1f)
+    ) {
+        Text(
+            text = stringResource(id = labelResId),
+            modifier = Modifier.weight(1f)
+        )
         Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
@@ -539,7 +621,6 @@ private fun CardCredits(modifier: Modifier = Modifier) {
     ElevatedCard(
         modifier = modifier
             .fillMaxWidth()
-            .height(268.dp)
     ) {
         Column(
             verticalArrangement = Arrangement.SpaceBetween,
@@ -573,7 +654,7 @@ private fun TopCard(onClick: () -> Unit, modifier: Modifier = Modifier, version:
                 .clickable { onClick() }) {
             Spacer(Modifier)
             Icon(
-                painter = painterResource(id = R.drawable.ic_satellites),
+                painter = painterResource(id = R.drawable.ic_sputnik),
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary
             )
@@ -624,6 +705,7 @@ private class DialogVisibility {
     var network by mutableStateOf(false)
     var bluetooth by mutableStateOf(false)
     var radioControl by mutableStateOf(false)
+    var whatsNew by mutableStateOf(false)
 }
 
 @Composable
@@ -631,12 +713,12 @@ private fun rememberDialogVisibility(): DialogVisibility {
     return rememberSaveable(saver = run {
         androidx.compose.runtime.saveable.Saver(
             save = {
-                listOf(it.position, it.locator, it.dataSources, it.network, it.bluetooth, it.radioControl)
+                listOf(it.position, it.locator, it.dataSources, it.network, it.bluetooth, it.radioControl, it.whatsNew)
             },
             restore = {
                 DialogVisibility().apply {
                     position = it[0]; locator = it[1]; dataSources = it[2]
-                    network = it[3]; bluetooth = it[4]; radioControl = it[5]
+                    network = it[3]; bluetooth = it[4]; radioControl = it[5]; whatsNew = it[6]
                 }
             }
         )
@@ -672,12 +754,15 @@ private fun rememberSettingsPermissions(
         else sendAction(SettingsAction.ShowToast(locationError))
     }
 
+    val satellitesImportError = stringResource(R.string.prefs_data_import_satellites_error)
+    val transceiversImportError = stringResource(R.string.prefs_data_import_transceivers_error)
+
     val tleRequest = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        uri?.let { sendAction(SettingsAction.UpdateTLEFromFile(it.toString())) }
+        uri?.let { sendAction(SettingsAction.UpdateTLEFromFile(it.toString(), satellitesImportError)) }
     }
 
     val transceiversRequest = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        uri?.let { sendAction(SettingsAction.UpdateTransceiversFromFile(it.toString())) }
+        uri?.let { sendAction(SettingsAction.UpdateTransceiversFromFile(it.toString(), transceiversImportError)) }
     }
 
     val bluetoothError = stringResource(R.string.prefs_bt_perm_error)

@@ -27,7 +27,9 @@ data class PassesSettings(
     val showDeepSpace: Boolean = true,
     val hoursAhead: Int,
     val minElevation: Double,
-    val selectedModes: List<String>,
+    val aosStartMinute: Int = 0,
+    val aosEndMinute: Int = 23 * 60 + 59,
+    val invertAosTimeWindow: Boolean = false,
     val selectedBands: List<String> = emptyList()
 )
 
@@ -40,6 +42,7 @@ data class RCSettings(
     val frequencyAddress: String,
     val frequencyPort: String,
     val frequencyFormat: String,
+    val frequencyOffsetHz: Long = 0L,
     val bluetoothRotatorState: Boolean,
     val bluetoothRotatorFormat: String,
     val bluetoothRotatorName: String,
@@ -59,15 +62,28 @@ data class OtherSettings(
     val shouldSeeWarning: Boolean,
     val shouldSeeWhatsNew: Boolean,
     val sstvMode: String = "Auto",
-    val audioSource: AudioSource = AudioSource.Mic
+    val audioSource: AudioSource = AudioSource.Mic,
+    val lowElevation: Double = 15.0,
+    val highElevation: Double = 45.0,
+    val radarCompassOffset: Float = 0f,
+    val radarCompassOffsetElev: Float = 0f
 )
 
+/**
+ * Data source URLs (TLE / transceivers) and their per-source enabled flags.
+ * [satelliteEnabled] and [transceiversEnabled] must be positionally aligned with the
+ * corresponding URL list: the flag at index [i] applies to the URL at index [i].
+ * Missing flags are treated as enabled (see [isSatelliteEnabled]/[isTransceiverEnabled]).
+ */
 data class DataSourcesSettings(
-    val useCustomTLE: Boolean,
-    val useCustomTransceivers: Boolean,
-    val tleUrl: String,
-    val transceiversUrl: String
-)
+    val satelliteUrls: List<String>,
+    val transceiversUrls: List<String>,
+    val satelliteEnabled: List<Boolean> = emptyList(),
+    val transceiversEnabled: List<Boolean> = emptyList()
+) {
+    fun isSatelliteEnabled(index: Int): Boolean = satelliteEnabled.getOrElse(index) { true }
+    fun isTransceiverEnabled(index: Int): Boolean = transceiversEnabled.getOrElse(index) { true }
+}
 
 data class RadioControlSettings(
     val enabled: Boolean,
@@ -76,12 +92,20 @@ data class RadioControlSettings(
     val rxRadioAddress: String,
     val txRadioName: String,
     val rxRadioName: String,
-    val baudRate: Int
+    val baudRate: Int,
+    /** IC-705 only: use single-radio split-VFO mode instead of two radios. */
+    val splitMode: Boolean = false
 ) {
     companion object {
-        val SUPPORTED_RADIOS = listOf(
-            "Yaesu FT-817/818",
-            "Yaesu FT-857/897"
-        )
+        const val MODEL_YAESU_FT817   = "Yaesu FT-817/818"
+        const val MODEL_YAESU_FT857   = "Yaesu FT-857/897"
+        const val MODEL_ICOM_IC705    = "Icom IC-705"
+
+        val SUPPORTED_RADIOS = listOf(MODEL_YAESU_FT817, MODEL_YAESU_FT857, MODEL_ICOM_IC705)
+
+        /** Baud rates available for Yaesu radios. */
+        val BAUD_RATES_YAESU = listOf(4800, 9600, 38400)
+        /** Baud rates available for Icom IC-705 (higher speeds supported via CI-V USB/BT). */
+        val BAUD_RATES_ICOM  = listOf(4800, 9600, 19200, 38400, 57600, 115200)
     }
 }

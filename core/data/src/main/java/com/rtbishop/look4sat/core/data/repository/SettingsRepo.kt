@@ -30,14 +30,17 @@ import com.rtbishop.look4sat.core.domain.model.OtherSettings
 import com.rtbishop.look4sat.core.domain.model.PassesSettings
 import com.rtbishop.look4sat.core.domain.model.RCSettings
 import com.rtbishop.look4sat.core.domain.model.RadioControlSettings
+import com.rtbishop.look4sat.core.domain.model.Constants
 import com.rtbishop.look4sat.core.domain.predict.GeoPos
 import com.rtbishop.look4sat.core.domain.repository.ISettingsRepo
+import com.rtbishop.look4sat.core.domain.source.Sources
 import com.rtbishop.look4sat.core.domain.utility.positionToQth
 import com.rtbishop.look4sat.core.domain.utility.qthToPosition
 import com.rtbishop.look4sat.core.domain.utility.round
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import org.json.JSONObject
 
 class SettingsRepo(
     private val locationManager: LocationManager,
@@ -55,6 +58,9 @@ class SettingsRepo(
     private val keyFilterShowDeepSpace = "filterShowDeepSpace"
     private val keyFilterHoursAhead = "filterHoursAhead"
     private val keyFilterMinElevation = "filterMinElevation"
+    private val keyFilterAosStartMinute = "filterAosStartMinute"
+    private val keyFilterAosEndMinute = "filterAosEndMinute"
+    private val keyFilterAosInvert = "filterAosInvert"
     private val keyNumberOfRadios = "numberOfRadios"
     private val keyNumberOfSatellites = "numberOfSatellites"
     private val keyRotatorAddress = "rotatorAddress"
@@ -65,9 +71,10 @@ class SettingsRepo(
     private val keyFrequencyAddress = "frequencyAddress"
     private val keyFrequencyPort = "frequencyPort"
     private val keyFrequencyFormat = "frequencyFormat"
+    private val keyFrequencyOffsetHz = "frequencyOffsetHz"
     private val keySelectedIds = "selectedIds"
-    private val keySelectedTypes = "selectedTypes"
-    private val keySelectedModes = "selectedModes"
+    private val keySelectedSatModes = "selectedSatModes"
+    private val keyLegacySelectedModes = "selectedModes"
     private val keySelectedBands = "selectedBands"
     private val keyAudioSource = "audioSource"
     private val keyStateOfAutoUpdate = "stateOfAutoUpdate"
@@ -85,17 +92,22 @@ class SettingsRepo(
     private val keyShouldSeeWarning = "shouldSeeWarning"
     private val keyShouldSeeWhatsNew = "shouldSeeWhatsNew_v$appVersionName"
     private val keySstvMode = "sstvMode"
-    private val keyUseCustomTle = "useCustomTle"
-    private val keyUseCustomTransceivers = "useCustomTransceivers"
-    private val keyTleUrl = "tleUrl"
-    private val keyTransceiversUrl = "transceiversUrl"
+    private val keyLowElevation = "lowElevation"
+    private val keyHighElevation = "highElevation"
+    private val keyRadarCompassOffset = "radarCompassOffset"
+    private val keyRadarCompassOffsetElev = "radarCompassOffsetElev"
+    private val keySatelliteUrls = "satelliteUrls"
+    private val keyTransceiversUrls = "transceiversUrls"
+    private val keySatelliteEnabled = "satelliteEnabled"
+    private val keyTransceiversEnabled = "transceiversEnabled"
     private val separatorComma = ","
+    private val separatorUrl = "\n"
 
     //region # Satellites selection settings
     private val _satelliteSelection = MutableStateFlow(getSelectedIds())
-    private val _typesSelection = MutableStateFlow(getSelectedTypes())
+    private val _satelliteModeSelection = MutableStateFlow(getSelectedSatModes())
     override val selectedIds: StateFlow<List<Int>> = _satelliteSelection
-    override val selectedTypes: StateFlow<List<String>> = _typesSelection
+    override val selectedSatModes: StateFlow<List<String>> = _satelliteModeSelection
 
     override fun setSelectedIds(ids: List<Int>) {
         val selectionString = ids.joinToString(separatorComma)
@@ -103,10 +115,10 @@ class SettingsRepo(
         _satelliteSelection.value = ids
     }
 
-    override fun setSelectedTypes(types: List<String>) {
-        val typesString = types.joinToString(separatorComma)
-        preferences.edit { putString(keySelectedTypes, typesString) }
-        _typesSelection.value = types
+    override fun setSelectedSatModes(modes: List<String>) {
+        val modesString = modes.joinToString(separatorComma)
+        preferences.edit { putString(keySelectedSatModes, modesString) }
+        _satelliteModeSelection.value = modes
     }
 
     private fun getSelectedIds(): List<Int> {
@@ -115,10 +127,11 @@ class SettingsRepo(
         return selectionString.split(separatorComma).map { it.toInt() }
     }
 
-    private fun getSelectedTypes(): List<String> {
-        val typesString = preferences.getString(keySelectedTypes, "Amateur")
-        if (typesString.isNullOrEmpty()) return emptyList()
-        return typesString.split(separatorComma)
+    private fun getSelectedSatModes(): List<String> {
+        val modesString = preferences.getString(keySelectedSatModes, null)
+            ?: preferences.getString(keyLegacySelectedModes, null)
+        if (modesString.isNullOrEmpty()) return emptyList()
+        return modesString.split(separatorComma).filter { it.isNotBlank() }.sorted()
     }
     //endregion
 
@@ -130,7 +143,9 @@ class SettingsRepo(
         putBoolean(keyFilterShowDeepSpace, settings.showDeepSpace)
         putInt(keyFilterHoursAhead, settings.hoursAhead)
         putLong(keyFilterMinElevation, settings.minElevation.toRawBits())
-        putString(keySelectedModes, settings.selectedModes.joinToString(separatorComma))
+        putInt(keyFilterAosStartMinute, settings.aosStartMinute)
+        putInt(keyFilterAosEndMinute, settings.aosEndMinute)
+        putBoolean(keyFilterAosInvert, settings.invertAosTimeWindow)
         putString(keySelectedBands, settings.selectedBands.joinToString(separatorComma))
         _passesSettings.value = settings
     }
@@ -139,11 +154,20 @@ class SettingsRepo(
         val showDeepSpace = preferences.getBoolean(keyFilterShowDeepSpace, true)
         val hoursAhead = preferences.getInt(keyFilterHoursAhead, 24)
         val minElevation = Double.fromBits(preferences.getLong(keyFilterMinElevation, 16.0.toRawBits()))
-        val selectedModesString = preferences.getString(keySelectedModes, null)
-        val selectedModes = selectedModesString?.split(separatorComma)?.filter { it.isNotBlank() }?.sorted() ?: emptyList()
+        val aosStartMinute = preferences.getInt(keyFilterAosStartMinute, 0).coerceIn(0, 23 * 60 + 59)
+        val aosEndMinute = preferences.getInt(keyFilterAosEndMinute, 23 * 60 + 59).coerceIn(0, 23 * 60 + 59)
+        val invertAosTimeWindow = preferences.getBoolean(keyFilterAosInvert, false)
         val selectedBandsString = preferences.getString(keySelectedBands, null)
         val selectedBands = selectedBandsString?.split(separatorComma)?.filter { it.isNotBlank() } ?: emptyList()
-        return PassesSettings(showDeepSpace, hoursAhead, minElevation, selectedModes, selectedBands)
+        return PassesSettings(
+            showDeepSpace,
+            hoursAhead,
+            minElevation,
+            aosStartMinute,
+            aosEndMinute,
+            invertAosTimeWindow,
+            selectedBands
+        )
     }
     //endregion
 
@@ -222,25 +246,6 @@ class SettingsRepo(
     private val _databaseState = MutableStateFlow(getDatabaseState())
     override val databaseState: StateFlow<DatabaseState> = _databaseState
 
-    override fun getSatelliteTypesIds(types: List<String>): List<Int> {
-        val idsSet = mutableSetOf<Int>()
-        types.forEach { type ->
-            val typeString = preferences.getString("type$type", null)
-            val typeIds = if (typeString.isNullOrBlank()) {
-                emptyList()
-            } else {
-                typeString.split(separatorComma).map { it.toInt() }
-            }
-            idsSet.addAll(typeIds)
-        }
-        return idsSet.toList()
-    }
-
-    override fun setSatelliteTypeIds(type: String, ids: List<Int>) {
-        if (type == "All") return
-        val typesString = ids.joinToString(separatorComma)
-        preferences.edit { putString("type$type", typesString) }
-    }
 
     override fun updateDatabaseState(state: DatabaseState) = preferences.edit {
         putInt(keyNumberOfSatellites, state.numberOfSatellites)
@@ -285,6 +290,10 @@ class SettingsRepo(
     override val rcSettings: StateFlow<RCSettings> = _rcSettings
 
     override fun updateRCSettings(settings: RCSettings) {
+        val clampedFreqOffsetHz = settings.frequencyOffsetHz.coerceIn(
+            Constants.FREQ_OFFSET_MIN_HZ,
+            Constants.FREQ_OFFSET_MAX_HZ
+        )
         preferences.edit {
             putBoolean(keyRotatorState, settings.rotatorState)
             putString(keyRotatorAddress, settings.rotatorAddress)
@@ -294,6 +303,7 @@ class SettingsRepo(
             putString(keyFrequencyAddress, settings.frequencyAddress)
             putString(keyFrequencyPort, settings.frequencyPort)
             putString(keyFrequencyFormat, settings.frequencyFormat)
+            putLong(keyFrequencyOffsetHz, clampedFreqOffsetHz)
             putBoolean(keyBluetoothRotatorState, settings.bluetoothRotatorState)
             putString(keyBluetoothRotatorFormat, settings.bluetoothRotatorFormat)
             putString(keyBluetoothRotatorName, settings.bluetoothRotatorName)
@@ -302,7 +312,7 @@ class SettingsRepo(
             putString(keyBluetoothFrequencyFormat, settings.bluetoothFrequencyFormat)
             putString(keyBluetoothFrequencyAddress, settings.bluetoothFrequencyAddress)
         }
-        _rcSettings.value = settings
+        _rcSettings.value = settings.copy(frequencyOffsetHz = clampedFreqOffsetHz)
     }
 
     private fun getRCSettings(): RCSettings = RCSettings(
@@ -314,6 +324,8 @@ class SettingsRepo(
         frequencyAddress = preferences.getString(keyFrequencyAddress, null) ?: "127.0.0.1",
         frequencyPort = preferences.getString(keyFrequencyPort, null) ?: "4532",
         frequencyFormat = preferences.getString(keyFrequencyFormat, null) ?: $$"F $FREQ",
+        frequencyOffsetHz = preferences.getLong(keyFrequencyOffsetHz, 0L)
+            .coerceIn(Constants.FREQ_OFFSET_MIN_HZ, Constants.FREQ_OFFSET_MAX_HZ),
         bluetoothRotatorState = preferences.getBoolean(keyBluetoothRotatorState, false),
         bluetoothRotatorFormat = preferences.getString(keyBluetoothRotatorFormat, null) ?: $$"P $AZ $EL",
         bluetoothRotatorName = preferences.getString(keyBluetoothRotatorName, null) ?: "Default",
@@ -342,6 +354,10 @@ class SettingsRepo(
                 putBoolean(keyShouldSeeWhatsNew, new.shouldSeeWhatsNew)
                 putString(keySstvMode, new.sstvMode)
                 putString(keyAudioSource, new.audioSource.name)
+                putLong(keyLowElevation, new.lowElevation.toRawBits())
+                putLong(keyHighElevation, new.highElevation.toRawBits())
+                putFloat(keyRadarCompassOffset, new.radarCompassOffset)
+                putFloat(keyRadarCompassOffsetElev, new.radarCompassOffsetElev)
             }
             new
         }
@@ -357,7 +373,11 @@ class SettingsRepo(
         shouldSeeWarning = preferences.getBoolean(keyShouldSeeWarning, true),
         shouldSeeWhatsNew = preferences.getBoolean(keyShouldSeeWhatsNew, true),
         sstvMode = preferences.getString(keySstvMode, null) ?: "Auto",
-        audioSource = AudioSource.entries.find { it.name == preferences.getString(keyAudioSource, null) } ?: AudioSource.Mic
+        audioSource = AudioSource.entries.find { it.name == preferences.getString(keyAudioSource, null) } ?: AudioSource.Mic,
+        lowElevation = Double.fromBits(preferences.getLong(keyLowElevation, 15.0.toRawBits())),
+        highElevation = Double.fromBits(preferences.getLong(keyHighElevation, 45.0.toRawBits())),
+        radarCompassOffset = preferences.getFloat(keyRadarCompassOffset, 0f),
+        radarCompassOffsetElev = preferences.getFloat(keyRadarCompassOffsetElev, 0f)
     )
     //endregion
 
@@ -366,21 +386,73 @@ class SettingsRepo(
     override val dataSourcesSettings: StateFlow<DataSourcesSettings> = _dataSourcesSettings
 
     override fun updateDataSourcesSettings(settings: DataSourcesSettings) {
+        // Normalize the enabled lists so they are positionally aligned with the URL lists.
+        // Missing entries default to enabled (true), keeping the persisted "one flag per URL"
+        // invariant intact even when a default empty list is used to construct the model.
+        val normalized = settings.copy(
+            satelliteEnabled = alignFlags(settings.satelliteUrls, settings.satelliteEnabled),
+            transceiversEnabled = alignFlags(settings.transceiversUrls, settings.transceiversEnabled)
+        )
         preferences.edit {
-            putBoolean(keyUseCustomTle, settings.useCustomTLE)
-            putBoolean(keyUseCustomTransceivers, settings.useCustomTransceivers)
-            putString(keyTleUrl, settings.tleUrl)
-            putString(keyTransceiversUrl, settings.transceiversUrl)
+            putString(keySatelliteUrls, normalized.satelliteUrls.joinToString(separatorUrl))
+            putString(keyTransceiversUrls, normalized.transceiversUrls.joinToString(separatorUrl))
+            putString(keySatelliteEnabled, normalized.satelliteEnabled.joinToString(separatorComma))
+            putString(keyTransceiversEnabled, normalized.transceiversEnabled.joinToString(separatorComma))
         }
-        _dataSourcesSettings.value = settings
+        _dataSourcesSettings.value = normalized
     }
 
-    private fun getDataSourcesSettings(): DataSourcesSettings = DataSourcesSettings(
-        useCustomTLE = preferences.getBoolean(keyUseCustomTle, false),
-        useCustomTransceivers = preferences.getBoolean(keyUseCustomTransceivers, false),
-        tleUrl = preferences.getString(keyTleUrl, "https://example.com/tle.txt") ?: "",
-        transceiversUrl = preferences.getString(keyTransceiversUrl, "https://example.com/radio.json") ?: ""
-    )
+    private fun getDataSourcesSettings(): DataSourcesSettings {
+        val (satUrls, satEnabled) = parseSources(
+            preferences.getString(keySatelliteUrls, null),
+            preferences.getString(keySatelliteEnabled, null),
+            Sources.satelliteDataUrls
+        )
+        val (txUrls, txEnabled) = parseSources(
+            preferences.getString(keyTransceiversUrls, null),
+            preferences.getString(keyTransceiversEnabled, null),
+            Sources.transceiversDataUrls
+        )
+        return DataSourcesSettings(
+            satelliteUrls = satUrls,
+            transceiversUrls = txUrls,
+            satelliteEnabled = satEnabled,
+            transceiversEnabled = txEnabled
+        )
+    }
+
+    private fun parseSources(
+        storedUrls: String?,
+        storedEnabled: String?,
+        defaults: List<String>
+    ): Pair<List<String>, List<Boolean>> {
+        if (storedUrls == null) return defaults to defaults.map { true }
+        val urls = storedUrls.split(separatorUrl)
+        val flags = if (storedEnabled.isNullOrEmpty()) emptyList() else storedEnabled.split(separatorComma)
+        val filteredUrls = mutableListOf<String>()
+        val filteredFlags = mutableListOf<Boolean>()
+        urls.forEachIndexed { index, url ->
+            if (url.isNotBlank()) {
+                filteredUrls.add(url)
+                filteredFlags.add(flags.getOrNull(index)?.toBoolean() ?: true)
+            }
+        }
+        return filteredUrls to filteredFlags
+    }
+
+    private fun alignFlags(urls: List<String>, flags: List<Boolean>): List<Boolean> {
+        if (flags.size >= urls.size) return flags.take(urls.size)
+        return flags + List(urls.size - flags.size) { true }
+    }
+    //endregion
+
+    //region # Data sources status
+    private val _dataSourcesStatus = MutableStateFlow<Map<String, Int>>(emptyMap())
+    override val dataSourcesStatus: StateFlow<Map<String, Int>> = _dataSourcesStatus
+
+    override fun updateDataSourcesStatus(status: Map<String, Int>) {
+        _dataSourcesStatus.value = status
+    }
     //endregion
 
     //region # Radio control settings
@@ -391,6 +463,7 @@ class SettingsRepo(
     private val keyTxRadioName = "txRadioName"
     private val keyRxRadioName = "rxRadioName"
     private val keyRadioBaudRate = "radioBaudRate"
+    private val keyRadioSplitMode = "radioSplitMode"
 
     private val _radioControlSettings = MutableStateFlow(getRadioControlSettings())
     override val radioControlSettings: StateFlow<RadioControlSettings> = _radioControlSettings
@@ -404,18 +477,42 @@ class SettingsRepo(
             putString(keyTxRadioName, settings.txRadioName)
             putString(keyRxRadioName, settings.rxRadioName)
             putInt(keyRadioBaudRate, settings.baudRate)
+            putBoolean(keyRadioSplitMode, settings.splitMode)
         }
         _radioControlSettings.value = settings
     }
 
     private fun getRadioControlSettings(): RadioControlSettings = RadioControlSettings(
         enabled = preferences.getBoolean(keyRadioControlEnabled, false),
-        radioModel = preferences.getString(keyRadioModel, null) ?: "Yaesu FT-817/818",
+        radioModel = preferences.getString(keyRadioModel, null) ?: RadioControlSettings.MODEL_YAESU_FT817,
         txRadioAddress = preferences.getString(keyTxRadioAddress, null) ?: "",
         rxRadioAddress = preferences.getString(keyRxRadioAddress, null) ?: "",
         txRadioName = preferences.getString(keyTxRadioName, null) ?: "TX Radio",
         rxRadioName = preferences.getString(keyRxRadioName, null) ?: "RX Radio",
-        baudRate = preferences.getInt(keyRadioBaudRate, 4800)
+        baudRate = preferences.getInt(keyRadioBaudRate, 4800),
+        splitMode = preferences.getBoolean(keyRadioSplitMode, false)
     )
-    //endregion
+
+    private val keySatelliteOffsets = "satelliteOffsets"
+
+    override fun getSatelliteOffset(catnum: Int): String {
+        val json = preferences.getString(keySatelliteOffsets, "{}") ?: "{}"
+        return try {
+            JSONObject(json).optString(catnum.toString(), "")
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    override fun setSatelliteOffset(catnum: Int, offset: String) {
+        val json = preferences.getString(keySatelliteOffsets, "{}") ?: "{}"
+        val updated = try {
+            val obj = JSONObject(json)
+            if (offset.isEmpty()) obj.remove(catnum.toString()) else obj.put(catnum.toString(), offset)
+            obj.toString()
+        } catch (_: Exception) {
+            """{"$catnum": "$offset"}"""
+        }
+        preferences.edit { putString(keySatelliteOffsets, updated) }
+    }
 }

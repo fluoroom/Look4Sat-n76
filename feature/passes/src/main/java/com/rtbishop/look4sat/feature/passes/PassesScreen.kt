@@ -67,7 +67,6 @@ import com.rtbishop.look4sat.core.domain.predict.OrbitalPass
 import com.rtbishop.look4sat.core.domain.repository.IContainerProvider
 import com.rtbishop.look4sat.core.presentation.EmptyListCard
 import com.rtbishop.look4sat.core.presentation.IconCard
-import com.rtbishop.look4sat.core.presentation.InfoDialog
 import com.rtbishop.look4sat.core.presentation.MainTheme
 import com.rtbishop.look4sat.core.presentation.NextPassRow
 import com.rtbishop.look4sat.core.presentation.R
@@ -75,6 +74,7 @@ import com.rtbishop.look4sat.core.presentation.ScreenColumn
 import com.rtbishop.look4sat.core.presentation.SwipeableItem
 import com.rtbishop.look4sat.core.presentation.TimerRow
 import com.rtbishop.look4sat.core.presentation.TopBar
+import com.rtbishop.look4sat.core.presentation.WhatsNewDialog
 import com.rtbishop.look4sat.core.presentation.elevationColor
 import com.rtbishop.look4sat.core.presentation.infiniteMarquee
 import com.rtbishop.look4sat.core.presentation.isVerticalLayout
@@ -99,14 +99,31 @@ private fun PassesScreen(
     navigateToRadar: (Int, Long) -> Unit
 ) {
     if (uiState.isPassesDialogShown) {
-        PassesDialog(
+        PassesFilterDialog(
             hours = uiState.hours,
             elevation = uiState.elevation,
+            lowElevation = uiState.lowElevation,
+            highElevation = uiState.highElevation,
+            aosStartMinute = uiState.aosStartMinute,
+            aosEndMinute = uiState.aosEndMinute,
+            invertAosTimeWindow = uiState.invertAosTimeWindow,
             showDeepSpace = uiState.showDeepSpace,
-            cancel = { onAction(PassesAction.TogglePassesDialog) }
-        ) { hours, elevation, showDeepSpace ->
-            onAction(PassesAction.FilterPasses(hours, elevation, showDeepSpace))
-        }
+            cancel = { onAction(PassesAction.TogglePassesDialog) },
+            accept = { params ->
+                onAction(
+                    PassesAction.FilterPasses(
+                        hoursAhead = params.hours,
+                        minElevation = params.elevation,
+                        lowElevation = params.lowElevation,
+                        highElevation = params.highElevation,
+                        aosStartMinute = params.aosStartMinute,
+                        aosEndMinute = params.aosEndMinute,
+                        invertAosTimeWindow = params.invertAosTimeWindow,
+                        showDeepSpace = params.showDeepSpace
+                    )
+                )
+            }
+        )
     }
     if (uiState.isTransponderDialogShown) {
         TransponderDialog(
@@ -119,19 +136,15 @@ private fun PassesScreen(
         }
     }
     if (uiState.shouldSeeWhatsNew) {
-        InfoDialog(
-            title = stringResource(R.string.pass_whatsnew_title),
-            text = stringResource(R.string.pass_whatsnew_message)
-        ) {
-            onAction(PassesAction.DismissWhatsNew)
-        }
+        val dismiss = { onAction(PassesAction.DismissWhatsNew) }
+        WhatsNewDialog(onDismiss = dismiss)
     }
     ScreenColumn(
         topBar = { isVerticalLayout ->
             TopBar(
                 isVerticalLayout = isVerticalLayout,
                 startAction = {
-                    IconCard(action = { onAction(PassesAction.TogglePassesDialog) }, resId = R.drawable.ic_filter)
+                    IconCard(action = { onAction(PassesAction.ToggleTransponderDialog) }, resId = R.drawable.ic_radios)
                 },
                 topInfo = {
                     TimerRow(timeString = uiState.nextTime, isTimeAos = uiState.isNextTimeAos)
@@ -140,7 +153,7 @@ private fun PassesScreen(
                     NextPassRow(pass = uiState.nextPass, isUtc = uiState.isUtc)
                 },
                 endAction = {
-                    IconCard(action = { onAction(PassesAction.ToggleTransponderDialog) }, resId = R.drawable.ic_radios)
+                    IconCard(action = { onAction(PassesAction.TogglePassesDialog) }, resId = R.drawable.ic_filter)
                 }
             )
         }
@@ -267,6 +280,11 @@ private fun StickyDateHeader(label: String, sunriseTime: String, sunsetTime: Str
     }
 }
 
+private fun displayLocale(): Locale {
+    val locale = Locale.getDefault()
+    return if (locale.language == Locale.CHINESE.language) locale else Locale.ENGLISH
+}
+
 @Preview(showBackground = true)
 @Composable
 private fun DeepSpacePassPreview() {
@@ -299,7 +317,7 @@ private fun PassItem(
         if (isUtc) TimeZone.getTimeZone("UTC") else TimeZone.getDefault()
     }
     val sdfTime = remember(isUtc) {
-        SimpleDateFormat("HH:mm:ss", Locale.ENGLISH).also { it.timeZone = timeZone }
+        SimpleDateFormat("HH:mm:ss", displayLocale()).also { it.timeZone = timeZone }
     }
     val aosTimeStr = remember(pass.aosTime, isUtc) { sdfTime.format(Date(pass.aosTime)) }
     val losTimeStr = remember(pass.losTime, isUtc) { sdfTime.format(Date(pass.losTime)) }

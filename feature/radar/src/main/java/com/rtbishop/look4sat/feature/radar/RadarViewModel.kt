@@ -35,6 +35,7 @@ import com.rtbishop.look4sat.core.domain.repository.ISatlib
 import com.rtbishop.look4sat.core.domain.repository.ISatelliteRepo
 import com.rtbishop.look4sat.core.domain.repository.ISensorsRepo
 import com.rtbishop.look4sat.core.domain.repository.ISettingsRepo
+import com.rtbishop.look4sat.core.domain.sstv.LineRecoveryStrategy
 import com.rtbishop.look4sat.core.domain.sstv.SstvDecoder
 import com.rtbishop.look4sat.core.domain.usecase.IAudioCapture
 import com.rtbishop.look4sat.core.domain.usecase.IAddToCalendar
@@ -70,11 +71,14 @@ class RadarViewModel(
     private val showToast: IShowToast
 ) : ViewModel() {
 
-    private val stationPos = settingsRepo.stationPosition.value
-    private val magDeclination = sensorsRepo.getMagDeclination(stationPos)
+    private var stationPos = settingsRepo.stationPosition.value
+    private var magDeclination = sensorsRepo.getMagDeclination(stationPos)
+    private var compassOffset = settingsRepo.otherSettings.value.radarCompassOffset
+    private var compassOffsetElev = settingsRepo.otherSettings.value.radarCompassOffsetElev
     private var transponders: List<SatRadio> = emptyList()
     private var sstvDecoder: SstvDecoder? = null
     private var sstvRecordingJob: Job? = null
+    private var sensorCollectionJob: Job? = null
 
     // Celestial positions change slowly, recompute at most once per minute
     private var lastCelestialUpdateMs = 0L
@@ -96,32 +100,66 @@ class RadarViewModel(
     val uiState: StateFlow<RadarState> = _uiState
 
     init {
-        collectCompassSensor()
-        collectSettingsChanges()
+        collectSettingsChanges()  // also handles initial sensor subscription
+        collectStationPositionChanges()
         collectPassAndStartTickLoop()
         collectRadioTrackingState()
     }
 
-    private fun collectCompassSensor() {
-        if (!settingsRepo.otherSettings.value.stateOfSensors) return
-        viewModelScope.launch {
+    // Starts sensor collection if not already running.
+    private fun startSensorCollection() {
+        if (sensorCollectionJob?.isActive == true) return
+        sensorCollectionJob = viewModelScope.launch {
             sensorsRepo.enableSensor()
             sensorsRepo.sensorData.collect { data ->
-                val orientationValues = (data.first + magDeclination) to data.second
+                val orientationValues =
+                    (data.first + magDeclination + compassOffset) to (data.second + compassOffsetElev)
                 _uiState.update { it.copy(orientationValues = orientationValues) }
             }
         }
     }
 
+    // Stops sensor collection and disables the hardware sensor.
+    private fun stopSensorCollection() {
+        sensorCollectionJob?.cancel()
+        sensorCollectionJob = null
+        sensorsRepo.disableSensor()
+    }
+
     private fun collectSettingsChanges() {
         viewModelScope.launch {
-            settingsRepo.otherSettings.collectLatest { settings ->
+            settingsRepo.otherSettings.collect { settings ->
+                compassOffset = settings.radarCompassOffset
+                compassOffsetElev = settings.radarCompassOffsetElev
                 _uiState.update {
                     it.copy(
                         isUtc = settings.stateOfUtc,
                         shouldShowSweep = settings.stateOfSweep,
-                        shouldUseCompass = settings.stateOfSensors
+                        shouldUseCompass = settings.stateOfSensors,
+                        shouldFlipRadar = settings.radarCompassOffsetElev < 0f
                     )
+                }
+                // Reactively wire sensor hardware to the compass setting
+                when {
+                    settings.stateOfSensors -> startSensorCollection()
+                    else -> stopSensorCollection()
+                }
+            }
+        }
+    }
+
+    private fun collectStationPositionChanges() {
+        viewModelScope.launch {
+            settingsRepo.stationPosition.collect { newPos ->
+                if (stationPos != newPos) {
+                    stationPos = newPos
+                    magDeclination = sensorsRepo.getMagDeclination(stationPos)
+                    lastCelestialUpdateMs = 0L // force celestial recompute on next tick
+                    val pass = _uiState.value.currentPass ?: return@collect
+                    if (!pass.isDeepSpace) {
+                        val track = satelliteRepo.getTrack(pass.orbitalObject, stationPos, pass.aosTime, pass.losTime)
+                        _uiState.update { it.copy(satTrack = track) }
+                    }
                 }
             }
         }
@@ -151,7 +189,7 @@ class RadarViewModel(
     private suspend fun loadPassData(pass: OrbitalPass): List<SatRadio> {
         _uiState.update { it.copy(currentPass = pass) }
         val settings = settingsRepo.passesSettings.value
-        val modes = settings.selectedModes
+        val modes = settingsRepo.selectedSatModes.value
         val bands = settings.selectedBands
         val allRadios = satelliteRepo.getRadiosWithId(pass.catNum).filter { radio ->
             val modeOk = modes.isEmpty() ||
@@ -231,8 +269,7 @@ class RadarViewModel(
     }
 
     override fun onCleared() {
-        sensorsRepo.disableSensor()
-        super.onCleared()
+        stopSensorCollection()
     }
 
     fun onAction(action: RadarAction) {
@@ -242,7 +279,17 @@ class RadarViewModel(
                 // Compute toggle state before the update so we don't read post-update value
                 val isTogglingOff = _uiState.value.transceivers.selectedUuid == action.uuid
                 val newUuid = if (isTogglingOff) null else action.uuid
-                _uiState.update { it.copy(transceivers = it.transceivers.copy(selectedUuid = newUuid)) }
+                // Load the saved offset for the newly selected satellite
+                val offsetKHz = if (!isTogglingOff) {
+                    transponders.find { it.uuid == action.uuid }
+                        ?.catnum?.let { settingsRepo.getSatelliteOffset(it) } ?: ""
+                } else ""
+                _uiState.update {
+                    it.copy(
+                        transceivers = it.transceivers.copy(selectedUuid = newUuid),
+                        calculatorOffsetKHz = offsetKHz
+                    )
+                }
                 // Only update the tracking service when selecting a different transponder to
                 // avoid resetting a user-adjusted TX base on re-expand
                 if (!isTogglingOff) {
@@ -314,6 +361,15 @@ class RadarViewModel(
             RadarAction.SstvReset -> {
                 sstvDecoder?.clearPixels()
                 _uiState.update { it.copy(sstv = it.sstv.copy(currentFrame = null)) }
+            }
+            is RadarAction.ChangeCalculatorOffset -> {
+                val catnum = _uiState.value.transceivers.selectedUuid?.let { uuid ->
+                    transponders.find { it.uuid == uuid }?.catnum
+                }
+                if (catnum != null) {
+                    settingsRepo.setSatelliteOffset(catnum, action.offsetKHz)
+                }
+                _uiState.update { it.copy(calculatorOffsetKHz = action.offsetKHz) }
             }
         }
     }
@@ -417,13 +473,32 @@ class RadarViewModel(
 
     private fun initSstvDecoder() {
         if (sstvDecoder == null) {
-            val decoder = SstvDecoder(sampleRate = audioCapture.sampleRate)
+            val decoder = SstvDecoder(
+                sampleRate = audioCapture.sampleRate,
+                targetRmsLevel = SSTV_TARGET_RMS,
+                includeScopeData = SSTV_INCLUDE_SCOPE,
+                enableRmsNormalization = SSTV_ENABLE_RMS_NORMALIZATION,
+                preFilterCutoffHz = SSTV_PREFILTER_CUTOFF_HZ,
+                enablePreFilter = SSTV_ENABLE_PREFILTER,
+                enableDiagnosticsHandle = SSTV_ENABLE_DIAGNOSTICS_HANDLE,
+                lineRecoveryStrategy = SSTV_LINE_RECOVERY_STRATEGY
+            )
             sstvDecoder = decoder
             decoder.lockMode(_uiState.value.sstv.selectedMode)
             _uiState.update { it.copy(sstv = it.sstv.copy(supportedModes = decoder.supportedModes)) }
             viewModelScope.launch {
                 decoder.frames.collect { frame ->
-                    _uiState.update { it.copy(sstv = it.sstv.copy(currentFrame = frame)) }
+                    val metrics = decoder.getQualityMetrics()
+                    _uiState.update {
+                        it.copy(sstv = it.sstv.copy(currentFrame = frame, diagnosticsMetrics = metrics))
+                    }
+                }
+            }
+            decoder.getDiagnosticsHandle()?.let { handle ->
+                viewModelScope.launch {
+                    handle.metrics.collectLatest { metrics ->
+                        _uiState.update { it.copy(sstv = it.sstv.copy(diagnosticsMetrics = metrics)) }
+                    }
                 }
             }
         }
@@ -459,6 +534,39 @@ class RadarViewModel(
     }
 
     companion object {
+        // SSTV Decoder Tuning Parameters
+        // ==============================
+        // SSTV_TARGET_RMS: Normalized signal level before FM demodulation.
+        //   - 0.25: Aggressive (original default), amplifies noise; use only for clean inputs
+        //   - 0.35-0.40: RECOMMENDED for typical phone/mic inputs
+        //   - 0.50-0.60: Conservative, best for noisy environments
+        private const val SSTV_TARGET_RMS = 0.45f  // Changed from 0.25 to safer default
+
+        // Enable/disable RMS normalization entirely. Set false for direct receiver outputs.
+        private const val SSTV_ENABLE_RMS_NORMALIZATION = true
+
+        // High-pass pre-filter to remove DC offset and subsonic noise before RMS normalization.
+        // Improves weak signal robustness by cleaning the noise floor estimate.
+        private const val SSTV_PREFILTER_CUTOFF_HZ = 500.0  // Removes everything below 500 Hz
+
+        // Enable pre-filtering. Set false to skip (minimal CPU cost if disabled).
+        private const val SSTV_ENABLE_PREFILTER = true
+
+        // Diagnostics handle can be enabled temporarily to capture field reports.
+        // Interpretation notes for noisy recordings:
+        //   - syncHitRate < 0.30: weak/noisy signal path or mistuned gain
+        //   - predictedLineBursts rising quickly: frequent sync loss and likely vertical collapse
+        //   - maxPredictedStreak > 3 in Robot36 mode: noisy path and synthetic line flooding
+        private const val SSTV_ENABLE_DIAGNOSTICS_HANDLE = false
+
+        // Line recovery policy:
+        //   - Look4SatLimited: caps predicted lines to reduce visible vertical collapse.
+        //   - Robot36Compatible: unlimited predicted lines (legacy Robot36 behavior).
+        // Ask users to compare both if they report line-skipping/compression artifacts.
+        private val SSTV_LINE_RECOVERY_STRATEGY = LineRecoveryStrategy.Robot36Compatible
+
+        // Debug: Return scope visualization in frames (increases per-frame memory usage).
+        private const val SSTV_INCLUDE_SCOPE = false
 
         val CTCSS_TONES = listOf(
             67.0, 69.3, 71.9, 74.4, 77.0, 79.7, 82.5, 85.4, 88.5, 91.5,
@@ -466,7 +574,6 @@ class RadarViewModel(
             141.3, 146.2, 151.4, 156.7, 162.2, 167.9, 173.8, 179.9, 186.2, 192.8, 203.5, 210.7,
             218.1, 225.7, 233.6, 241.8, 250.3
         )
-
 
         fun factory(container: IMainContainer) = viewModelFactory {
             initializer {

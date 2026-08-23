@@ -29,6 +29,7 @@ interface IMainContainer {
     val selectionRepo: ISelectionRepo
     val satelliteRepo: ISatelliteRepo
     val databaseRepo: IDatabaseRepo
+    val amSatRepo: IAmSatRepository
     val radioTrackingService: IRadioTrackingService
     val satlib: ISatlib
     fun provideAddToCalendar(): IAddToCalendar
@@ -40,6 +41,7 @@ interface IMainContainer {
     fun provideRxRadioController(): IRadioController
     fun provideAudioCapture(): IAudioCapture
     fun provideSaveImage(): ISaveImage
+    fun providePairedBluetoothDevices(): List<Pair<String, String>>
 }
 
 interface IContainerProvider {

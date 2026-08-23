@@ -26,9 +26,11 @@ import androidx.room.Room
 import com.rtbishop.look4sat.core.data.database.Look4SatDb
 import com.rtbishop.look4sat.core.data.framework.BluetoothReporter
 import com.rtbishop.look4sat.core.data.framework.Ft817Controller
+import com.rtbishop.look4sat.core.data.framework.Ic705Controller
 import com.rtbishop.look4sat.core.data.framework.NetworkReporter
 import com.rtbishop.look4sat.core.data.framework.RadioTrackingService
 import com.rtbishop.look4sat.core.data.framework.Satlib
+import com.rtbishop.look4sat.core.data.repository.AmSatRepository
 import com.rtbishop.look4sat.core.data.repository.DatabaseRepo
 import com.rtbishop.look4sat.core.data.repository.SatelliteRepo
 import com.rtbishop.look4sat.core.data.repository.SelectionRepo
@@ -40,6 +42,7 @@ import com.rtbishop.look4sat.core.data.usecase.AddToCalendar
 import com.rtbishop.look4sat.core.data.usecase.AudioCapture
 import com.rtbishop.look4sat.core.data.usecase.SaveImage
 import com.rtbishop.look4sat.core.data.usecase.ShowToast
+import com.rtbishop.look4sat.core.domain.model.RadioControlSettings
 import com.rtbishop.look4sat.core.domain.repository.IDatabaseRepo
 import com.rtbishop.look4sat.core.domain.repository.IMainContainer
 import com.rtbishop.look4sat.core.domain.repository.IRadioController
@@ -66,12 +69,14 @@ import okhttp3.OkHttpClient
 class MainContainer(private val context: Context) : IMainContainer {
 
     private val localSource = provideLocalSource()
+    private val remoteSource = provideRemoteSource()
     private val mainHandler = CoroutineExceptionHandler { _, error -> println("MainHandler: $error") }
     override val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + mainHandler)
     override val settingsRepo = provideSettingsRepo()
     override val selectionRepo = provideSelectionRepo()
     override val satelliteRepo = provideSatelliteRepo()
     override val databaseRepo = provideDatabaseRepo()
+    override val amSatRepo by lazy { AmSatRepository(remoteSource) }
     override val radioTrackingService: IRadioTrackingService by lazy {
         val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         RadioTrackingService(appScope, manager, satelliteRepo, settingsRepo)
@@ -104,26 +109,44 @@ class MainContainer(private val context: Context) : IMainContainer {
             rc.rotatorAddress,
             rc.rotatorPort.toIntOrNull() ?: 0,
             rc.frequencyAddress,
-            rc.frequencyPort.toIntOrNull() ?: 0
+            rc.frequencyPort.toIntOrNull() ?: 0,
+            rc.frequencyOffsetHz
         )
     }
 
     override fun provideTxRadioController(): IRadioController {
-        val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-        val address = settingsRepo.radioControlSettings.value.txRadioAddress
-        return Ft817Controller(manager, address)
+        val manager  = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+        val settings = settingsRepo.radioControlSettings.value
+        val address  = settings.txRadioAddress
+        return if (settings.radioModel == RadioControlSettings.MODEL_ICOM_IC705) {
+            Ic705Controller(manager, address)
+        } else {
+            Ft817Controller(manager, address)
+        }
     }
 
     override fun provideRxRadioController(): IRadioController {
-        val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-        val address = settingsRepo.radioControlSettings.value.rxRadioAddress
-        return Ft817Controller(manager, address)
+        val manager  = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+        val settings = settingsRepo.radioControlSettings.value
+        val address  = settings.rxRadioAddress
+        return if (settings.radioModel == RadioControlSettings.MODEL_ICOM_IC705) {
+            Ic705Controller(manager, address)
+        } else {
+            Ft817Controller(manager, address)
+        }
     }
 
     override fun provideSensorsRepo(): ISensorsRepo {
         val manager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
         val displayManager = context.getSystemService(DisplayManager::class.java)
         return SensorsRepo(manager, displayManager)
+    }
+
+    override fun providePairedBluetoothDevices(): List<Pair<String, String>> = buildList {
+        try {
+            val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+            manager.adapter?.bondedDevices?.forEach { add(Pair(it.name ?: "Unknown", it.address ?: "")) }
+        } catch (_: SecurityException) {}
     }
 
     private fun provideDatabaseRepo(): IDatabaseRepo {

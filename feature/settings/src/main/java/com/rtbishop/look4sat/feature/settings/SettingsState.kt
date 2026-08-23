@@ -28,7 +28,10 @@ data class PositionSettings(
 )
 
 data class DataSettings(
-    val isUpdating: Boolean, val entriesTotal: Int, val radiosTotal: Int, val timestamp: Long
+    val isUpdating: Boolean,
+    val entriesTotal: Int,
+    val radiosTotal: Int,
+    val timestamp: Long
 )
 
 data class SettingsState(
@@ -38,7 +41,9 @@ data class SettingsState(
     val otherSettings: OtherSettings,
     val rcSettings: RCSettings,
     val radioControlSettings: RadioControlSettings,
-    val dataSourcesSettings: DataSourcesSettings
+    val dataSourcesSettings: DataSourcesSettings,
+    val dataSourcesStatus: Map<String, Int> = emptyMap(),
+    val pairedBluetoothDevices: List<Pair<String, String>> = emptyList()
 )
 
 sealed interface SettingsAction {
@@ -50,8 +55,8 @@ sealed interface SettingsAction {
 
     // Data
     data object UpdateFromWeb : SettingsAction
-    data class UpdateTLEFromFile(val uri: String) : SettingsAction
-    data class UpdateTransceiversFromFile(val uri: String) : SettingsAction
+    data class UpdateTLEFromFile(val uri: String, val invalidFileMessage: String) : SettingsAction
+    data class UpdateTransceiversFromFile(val uri: String, val invalidFileMessage: String) : SettingsAction
     data object ClearAllData : SettingsAction
 
     // Toggles
@@ -61,6 +66,8 @@ sealed interface SettingsAction {
     data class ToggleSensor(val value: Boolean) : SettingsAction
     data class ToggleLightTheme(val value: Boolean) : SettingsAction
     data class ToggleNightMode(val value: Boolean) : SettingsAction
+    data class SetRadarCompassOffset(val value: Float) : SettingsAction
+    data class SetRadarCompassOffsetElev(val value: Float) : SettingsAction
 
     // Remote control
     data class UpdateRC(val settings: RCSettings) : SettingsAction
