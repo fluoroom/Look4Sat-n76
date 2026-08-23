@@ -39,48 +39,31 @@ It is now and always will be completely ad-free and open-source.
 
 ## This fork
 
-This fork adds **HYS N76 Bluetooth radio control** and several quality-of-life improvements on top of upstream Look4Sat.
+This fork tracks [upstream Look4Sat](https://github.com/rt-bishop/Look4Sat) (AMSAT status, custom data sources, IC-705 CAT, Doppler, AOS/elevation filters) and adds **direct HYS N76 Bluetooth radio control** plus a few filter and SSTV extras. The old satlib HTTP API is gone — the HT is driven over Bluetooth, with no local Hamlib or HTTP bridge.
 
-### Transponder filters applied to the radar screen
+### HYS N76 Bluetooth
 
-The mode and band filters set in the passes screen (e.g. FM, V/U) are now also applied to the transponder list shown on the radar screen. Only transceivers that match the active filter are displayed, keeping the list focused on what you actually care about.
+In Settings → radio control, pick **N76 BT**, then the paired handheld. On the radar transponder list, **Connect** and **Track** send Doppler-corrected RX/TX frequencies and optional satellite name / az / el to the radio.
 
-### SSTV audio input selection
+Optional N76 settings (all independently bypassable):
 
-The SSTV decoder lets you choose the audio input source: **Microphone** (default) or **Unprocessed** (raw ADC, bypasses noise suppression). Select from the button in the SSTV control bar before starting a recording.
+* Sat firmware ≥137 (16-byte SAT mode) vs older exact-frequency mode
+* Poll interval (250 ms–10 s)
+* Forced RX/TX CTCSS
+* RFCOMM RX audio for SSTV and digimodes, with optional speaker monitor
+* Record HT audio and/or phone mic, including auto-record while tracking
 
-### [satlib](https://github.com/fluoroom/satlib)
+The expanded transponder panel also exposes hold-to-PTT, monitor, record, and play-last-recording.
 
-satlib is a universal local-network API that exposes complete, real-time satellite pass data so any external application can consume it over HTTP, without device-specific integrations inside the tracker.
+### Transponder filters
 
-satlib data is published only while the **Track** toggle is active on the radar screen. Selecting a transponder alone does not trigger updates — tracking must be explicitly enabled.
+Mode and band filters on the passes screen (e.g. FM, APRS, V/U) are built from the modes present on the selected satellites. The same filter is applied to the radar transponder list, so only matching radios are shown.
 
-While tracking is active, any device on the same network can poll:
+### SSTV
 
-```
-GET http://<phone-ip>:4534/
-```
+The decoder can take audio from **Microphone**, **Line-in / Unprocessed**, **Bluetooth SCO**, **Internal audio**, or **N76 HT (direct)**. Choose the source in the SSTV control bar before recording.
 
-and receive a live JSON snapshot updated every second:
-
-```json
-{
-  "satName": "ISS (ZARYA)",
-  "azimuthDeg": 247.35,
-  "elevationDeg": 12.84,
-  "altitudeKm": 421.10,
-  "txFrequencyHz": 145827340,
-  "rxFrequencyHz": 145826100,
-  "ctcssTxToneHz": 67.0,
-  "ctcsRxToneHz": null,
-  "mode": "FM",
-  "aosTime": 1752012345000,
-  "losTime": 1752012945000,
-  ...
-}
-```
-
-Full field reference, idle state semantics, and versioning rules are documented in [SATLIB.md](SATLIB.md).
+Auto mode can lock mid-image from line timing and will retune when the pulse family changes (Scottie → Martin) instead of painting the next header as shredded lines.
 
 ---
 
