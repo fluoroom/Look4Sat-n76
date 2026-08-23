@@ -24,6 +24,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import android.content.Intent
 import android.net.Uri
+import android.provider.DocumentsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -1334,27 +1335,20 @@ private fun N76DebugSettings(
     )
     N76SwitchRow("Send sat info & freq (HT sat mode)", sendSatInfo, onSendSatInfo, enabled)
     N76SwitchRow("Sat firmware ≥137 (16-byte SAT mode)", satFirmware, onSatFirmware, enabled)
-    Text("Poll interval", fontWeight = FontWeight.Medium)
-    FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
-        maxItemsInEachRow = 4,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        N76Settings.POLL_STEPS_MS.forEach { ms ->
-            FilterChip(
-                selected = ms == pollMs,
-                onClick = { onPollMs(ms) },
-                label = { Text("${ms}ms", fontSize = 11.sp) },
-                enabled = enabled
-            )
-        }
-    }
+    ChoiceDropdown(
+        label = "Poll interval",
+        selected = pollMs,
+        options = N76Settings.POLL_STEPS_MS,
+        optionLabel = { pollLabel(it) },
+        onSelect = onPollMs,
+        enabled = enabled
+    )
     N76SwitchRow("Force RX CTCSS", forceRx, onForceRx, enabled)
     if (forceRx) N76CtcssPicker(forceRxTone, onForceRxTone, enabled)
     N76SwitchRow("Force TX CTCSS", forceTx, onForceTx, enabled)
     if (forceTx) N76CtcssPicker(forceTxTone, onForceTxTone, enabled)
     N76SwitchRow("Receive RX audio via RFCOMM (SSTV/digimodes)", audioRfcomm, onAudioRfcomm, enabled)
-    N76SwitchRow("Speaker monitor (bypass = off)", speakerMonitor, onSpeakerMonitor, enabled && audioRfcomm)
+    N76SwitchRow("Speaker monitor", speakerMonitor, onSpeakerMonitor, enabled && audioRfcomm)
     N76SwitchRow("Record HT audio", recordHt, onRecordHt, enabled)
     N76SwitchRow("Record phone mic", recordMic, onRecordMic, enabled)
     N76SwitchRow("Auto-record while tracking", recordSatOnly, onRecordSatOnly, enabled)
@@ -1363,12 +1357,11 @@ private fun N76DebugSettings(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.fillMaxWidth()
     ) {
-        Text(
-            text = outputFolder.substringAfterLast('/').ifBlank { "Default app folder" },
-            fontSize = 13.sp,
-            modifier = Modifier.weight(1f)
-        )
-        CardButton(onClick = onPickFolder, text = "Folder")
+        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+            Text("Audio save folder", fontWeight = FontWeight.Medium, fontSize = 13.sp)
+            Text(audioSaveFolderLabel(outputFolder), fontSize = 13.sp)
+        }
+        CardButton(onClick = onPickFolder, text = "Choose")
     }
     Spacer(modifier = Modifier.height(6.dp))
 }
@@ -1387,20 +1380,75 @@ private fun N76SwitchRow(label: String, checked: Boolean, onChecked: (Boolean) -
 
 @Composable
 private fun N76CtcssPicker(selected: Int, onSelect: (Int) -> Unit, enabled: Boolean) {
-    FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
-        maxItemsInEachRow = 5,
-        modifier = Modifier.fillMaxWidth()
+    ChoiceDropdown(
+        label = "CTCSS",
+        selected = selected,
+        options = N76Settings.CTCSS_HZ_X100.toList(),
+        optionLabel = { if (it == 0) "None" else "%.1f Hz".format(it / 100.0) },
+        onSelect = onSelect,
+        enabled = enabled
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun <T> ChoiceDropdown(
+    label: String,
+    selected: T,
+    options: List<T>,
+    optionLabel: (T) -> String,
+    onSelect: (T) -> Unit,
+    enabled: Boolean
+) {
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { if (enabled) expanded = it }
     ) {
-        N76Settings.CTCSS_HZ_X100.forEach { value ->
-            val label = if (value == 0) "none" else "%.1f".format(value / 100.0)
-            FilterChip(
-                selected = value == selected,
-                onClick = { onSelect(value) },
-                label = { Text(label, fontSize = 11.sp) },
-                enabled = enabled
-            )
+        OutlinedTextField(
+            value = optionLabel(selected),
+            onValueChange = {},
+            readOnly = true,
+            enabled = enabled,
+            singleLine = true,
+            label = { Text(label) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            modifier = Modifier
+                .menuAnchor()
+                .fillMaxWidth()
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(optionLabel(option), fontSize = 13.sp) },
+                    onClick = {
+                        onSelect(option)
+                        expanded = false
+                    }
+                )
+            }
         }
+    }
+}
+
+private fun pollLabel(ms: Long): String = when {
+    ms < 1000L -> "$ms ms"
+    ms % 1000L == 0L -> "${ms / 1000L} s"
+    else -> "${ms / 1000.0} s"
+}
+
+private fun audioSaveFolderLabel(uriString: String): String {
+    if (uriString.isBlank()) return "Default app folder"
+    return runCatching {
+        val uri = Uri.parse(uriString)
+        val docId = DocumentsContract.getTreeDocumentId(uri)
+        val decoded = Uri.decode(docId)
+        decoded.substringAfter(':', decoded).trimStart('/').ifBlank { decoded }
+    }.getOrElse {
+        Uri.decode(uriString.substringAfterLast('/')).ifBlank { "Audio save folder" }
     }
 }
 

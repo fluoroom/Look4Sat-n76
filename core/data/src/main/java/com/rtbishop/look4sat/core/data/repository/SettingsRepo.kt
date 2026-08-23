@@ -536,7 +536,8 @@ class SettingsRepo(
     private fun getN76Settings(): N76Settings = N76Settings(
         sendSatInfo = preferences.getBoolean(keyN76SendSatInfo, true),
         satFirmware = preferences.getBoolean(keyN76SatFirmware, true),
-        pollIntervalMs = preferences.getLong(keyN76PollMs, 500L),
+        pollIntervalMs = preferences.getLong(keyN76PollMs, 500L)
+            .coerceIn(N76Settings.POLL_MIN_MS, N76Settings.POLL_MAX_MS),
         forceRxCtcss = preferences.getBoolean(keyN76ForceRx, false),
         forceRxCtcssHzx100 = preferences.getInt(keyN76ForceRxTone, 0),
         forceTxCtcss = preferences.getBoolean(keyN76ForceTx, false),

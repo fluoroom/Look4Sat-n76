@@ -38,7 +38,9 @@ data class N76Settings(
     val inputDeviceId: Int = 0
 ) {
     companion object {
-        val POLL_STEPS_MS = (1..12).map { it * 250L }
+        const val POLL_MIN_MS = 250L
+        const val POLL_MAX_MS = 10_000L
+        val POLL_STEPS_MS = (1..(POLL_MAX_MS / POLL_MIN_MS).toInt()).map { it * POLL_MIN_MS }
 
         /** Standard CTCSS values as Hz × 100. Index 0 is none. */
         val CTCSS_HZ_X100 = intArrayOf(

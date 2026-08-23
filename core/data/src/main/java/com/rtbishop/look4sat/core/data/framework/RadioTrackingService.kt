@@ -21,6 +21,7 @@ import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.util.Log
 import com.rtbishop.look4sat.core.domain.model.BluetoothAddress
+import com.rtbishop.look4sat.core.domain.model.N76Settings
 import com.rtbishop.look4sat.core.domain.model.RadioControlSettings
 import com.rtbishop.look4sat.core.domain.model.SatRadio
 import com.rtbishop.look4sat.core.domain.predict.OrbitalPass
@@ -695,7 +696,7 @@ class RadioTrackingService(
                         distance = pos.distance
                     )
                 }
-                delay(live.pollIntervalMs.coerceIn(250L, 3000L))
+                delay(live.pollIntervalMs.coerceIn(N76Settings.POLL_MIN_MS, N76Settings.POLL_MAX_MS))
             }
         } finally {
             if (n76SatActive) {

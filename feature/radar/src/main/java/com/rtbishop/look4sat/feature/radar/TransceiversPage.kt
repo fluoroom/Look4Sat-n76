@@ -47,7 +47,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedButton
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -448,53 +452,10 @@ private fun ExpandedRadioControl(
 
         // CTCSS (only for FM uplink)
         if (radio.uplinkMode?.uppercase() == "FM") {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    text = "CTCSS",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                    maxItemsInEachRow = 5,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    val chipModifier = Modifier.weight(1f)
-                    FilterChip(
-                        selected = radioControl.ctcssTone == null,
-                        onClick = { onAction(RadarAction.SetCtcssTone(null)) },
-                        label = {
-                            Text(
-                                text = "Off",
-                                fontSize = 12.sp,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        },
-                        modifier = chipModifier
-                    )
-                    RadarViewModel.CTCSS_TONES.forEach { tone ->
-                        FilterChip(
-                            selected = radioControl.ctcssTone == tone,
-                            onClick = { onAction(RadarAction.SetCtcssTone(tone)) },
-                            label = {
-                                Text(
-                                    text = String.format(Locale.ENGLISH, "%.1f", tone),
-                                    fontSize = 12.sp,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                            },
-                            modifier = chipModifier
-                        )
-                    }
-                }
-            }
+            CtcssDropdown(
+                selected = radioControl.ctcssTone,
+                onSelect = { onAction(RadarAction.SetCtcssTone(it)) }
+            )
         }
 
         // Control buttons
@@ -979,6 +940,49 @@ private fun DopplerFrequencyCalculator(
                 }
             }
         }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CtcssDropdown(
+    selected: Double?,
+    onSelect: (Double?) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val options = listOf<Double?>(null) + RadarViewModel.CTCSS_TONES
+    val label: (Double?) -> String = { tone ->
+        tone?.let { String.format(Locale.ENGLISH, "%.1f Hz", it) } ?: "Off"
+    }
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it }
+    ) {
+        OutlinedTextField(
+            value = label(selected),
+            onValueChange = {},
+            readOnly = true,
+            singleLine = true,
+            label = { Text("CTCSS") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            modifier = Modifier
+                .menuAnchor()
+                .fillMaxWidth()
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            options.forEach { tone ->
+                DropdownMenuItem(
+                    text = { Text(label(tone), fontSize = 13.sp) },
+                    onClick = {
+                        onSelect(tone)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
 }
 
 @Composable

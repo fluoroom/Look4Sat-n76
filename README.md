@@ -1,10 +1,10 @@
 # Look4Sat: Satellite tracker
 
-[![Look4Sat CI](https://github.com/fluoroom/Look4Sat-satlib/actions/workflows/release.yml/badge.svg)](https://github.com/fluoroom/Look4Sat-satlib/actions/workflows/release.yml)
+[![Look4Sat CI](https://github.com/fluoroom/Look4Sat-n76/actions/workflows/release.yml/badge.svg)](https://github.com/fluoroom/Look4Sat-n76/actions/workflows/release.yml)
 
-### [SatLib](https://github.com/fluoroom/satlib) fork, for using with [N76-satlib-android](https://github.com/fluoroom/n76bt-satlib-android) and others.
+### N76 fork of Look4Sat, for using the HYS N76 over Bluetooth.
 
-### !!! This fork must be downloaded from [releases page](https://github.com/fluoroom/Look4Sat-satlib/releases), NOT app stores, until (maybe) the main Look4Sat project adopts these changes.
+### !!! This fork must be downloaded from [releases page](https://github.com/fluoroom/Look4Sat-n76/releases), NOT app stores, until (maybe) the main Look4Sat project adopts these changes.
 
 <img src="https://play.google.com/intl/en_gb/badges/static/images/badges/en_badge_web_generic.png" alt="Get it on Google Play" height="80"> <img src="https://fdroid.gitlab.io/artwork/badge/get-it-on.png" alt="Get it on F-Droid" height="80">
 
@@ -39,7 +39,7 @@ It is now and always will be completely ad-free and open-source.
 
 ## This fork
 
-This fork adds **satlib** and several quality-of-life improvements on top of upstream Look4Sat.
+This fork adds **HYS N76 Bluetooth radio control** and several quality-of-life improvements on top of upstream Look4Sat.
 
 ### Transponder filters applied to the radar screen
 
