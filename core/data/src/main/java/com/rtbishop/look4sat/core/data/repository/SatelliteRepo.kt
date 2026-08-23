@@ -35,6 +35,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import java.util.TimeZone
@@ -70,11 +73,16 @@ class SatelliteRepo(
     override suspend fun initRepository() = withContext(dispatcher) {
         combine(
             settingsRepo.selectedIds,
-            settingsRepo.stationPosition
-        ) { selectedIds, _ -> selectedIds }
-            .collect { selectedIds ->
+            settingsRepo.stationPosition,
+            settingsRepo.selectedSatModes,
+            settingsRepo.passesSettings,
+            settingsRepo.otherSettings.map { it.stateOfUtc }.distinctUntilChanged()
+        ) { selectedIds, _, modes, settings, _ ->
+            Triple(selectedIds, modes, settings)
+        }
+            .debounce(50.milliseconds)
+            .collect { (selectedIds, modes, settings) ->
                 _satellites.update { localStorage.getEntriesWithIds(selectedIds) }
-                val settings = settingsRepo.passesSettings.value
                 calculatePasses(
                     time = System.currentTimeMillis(),
                     hoursAhead = settings.hoursAhead,
@@ -82,11 +90,12 @@ class SatelliteRepo(
                     aosStartMinute = settings.aosStartMinute,
                     aosEndMinute = settings.aosEndMinute,
                     invertAosTimeWindow = settings.invertAosTimeWindow,
-                    modes = settingsRepo.selectedSatModes.value,
+                    modes = modes,
                     bands = settings.selectedBands
                 )
                 try {
-                    _availableModes.update { localStorage.getAvailableModes(selectedIds) }
+                    val listed = localStorage.getAvailableModes(selectedIds)
+                    _availableModes.update { (listed + modes).distinct().sorted() }
                 } catch (_: Exception) {}
             }
     }
@@ -143,16 +152,12 @@ class SatelliteRepo(
         val normalizedTime = time / 60_000L * 60_000L
         val currentSatellites = _satellites.value
         withContext(dispatcher) {
-            val modeSet = if (modes.isEmpty()) null else localStorage.getIdsWithModes(modes).toHashSet()
-            val bandSet = if (bands.isEmpty()) null else localStorage.getIdsWithBands(bands).toHashSet()
             val stationPos = settingsRepo.stationPosition.value
-            val filteredSatellites = if (modeSet == null && bandSet == null) {
+            val filteredSatellites = if (modes.isEmpty() && bands.isEmpty()) {
                 currentSatellites
             } else {
-                currentSatellites.filter { sat ->
-                    (modeSet == null || sat.data.catnum in modeSet) &&
-                    (bandSet == null || sat.data.catnum in bandSet)
-                }
+                val matchingIds = localStorage.getIdsMatchingFilters(modes, bands).toHashSet()
+                currentSatellites.filter { it.data.catnum in matchingIds }
             }
             // Compute passes for each satellite in parallel
             val passLists = coroutineScope {
@@ -169,7 +174,9 @@ class SatelliteRepo(
                         pass.losTime > time
                         && pass.aosTime < timeFuture
                         && pass.maxElevation > minElevation
-                        && (pass.isDeepSpace || isAosInRange(pass.aosTime, aosStartMinute, aosEndMinute, invertAosTimeWindow))
+                        && (pass.isDeepSpace || isAosInRange(
+                            pass.aosTime, aosStartMinute, aosEndMinute, invertAosTimeWindow
+                        ))
                     ) {
                         newPasses.add(pass)
                     }
@@ -188,7 +195,12 @@ class SatelliteRepo(
         aosEndMinute: Int,
         invertAosTimeWindow: Boolean
     ): Boolean {
-        val offsetMillis = TimeZone.getDefault().getOffset(aosTime).toLong()
+        val tz = if (settingsRepo.otherSettings.value.stateOfUtc) {
+            TimeZone.getTimeZone("UTC")
+        } else {
+            TimeZone.getDefault()
+        }
+        val offsetMillis = tz.getOffset(aosTime).toLong()
         val localMillis = Math.floorMod(aosTime + offsetMillis, 24L * 60L * 60L * 1000L)
         val aosMinute = (localMillis / 60_000L).toInt()
         val inRange = if (aosStartMinute <= aosEndMinute) {

@@ -214,6 +214,7 @@ private fun PagerCard(
                         transceivers = uiState.transceivers.transmitters,
                         selectedUuid = uiState.transceivers.selectedUuid,
                         radioControl = uiState.radioControl,
+                        n76 = uiState.n76,
                         onAction = onAction
                     )
                     RadarPage.Calculator -> CalculatorPage(

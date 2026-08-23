@@ -20,6 +20,7 @@ package com.rtbishop.look4sat.feature.settings
 import com.rtbishop.look4sat.core.domain.model.DataSourcesSettings
 import com.rtbishop.look4sat.core.domain.model.OtherSettings
 import com.rtbishop.look4sat.core.domain.model.RCSettings
+import com.rtbishop.look4sat.core.domain.model.N76Settings
 import com.rtbishop.look4sat.core.domain.model.RadioControlSettings
 import com.rtbishop.look4sat.core.domain.predict.GeoPos
 
@@ -41,6 +42,7 @@ data class SettingsState(
     val otherSettings: OtherSettings,
     val rcSettings: RCSettings,
     val radioControlSettings: RadioControlSettings,
+    val n76Settings: N76Settings,
     val dataSourcesSettings: DataSourcesSettings,
     val dataSourcesStatus: Map<String, Int> = emptyMap(),
     val pairedBluetoothDevices: List<Pair<String, String>> = emptyList()
@@ -72,6 +74,8 @@ sealed interface SettingsAction {
     // Remote control
     data class UpdateRC(val settings: RCSettings) : SettingsAction
     data class UpdateRadioControl(val settings: RadioControlSettings) : SettingsAction
+    data class UpdateN76(val settings: N76Settings) : SettingsAction
+    data object RefreshPairedBluetooth : SettingsAction
 
     // Data sources
     data class UpdateDataSources(val settings: DataSourcesSettings) : SettingsAction

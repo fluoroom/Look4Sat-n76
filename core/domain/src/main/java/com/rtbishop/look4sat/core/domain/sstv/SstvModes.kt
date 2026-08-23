@@ -22,6 +22,46 @@ import kotlin.math.round
 internal class PixelBuffer(var width: Int, var height: Int) {
     var pixels = IntArray(width * height)
     var line = 0
+
+    fun startStrip(w: Int) {
+        width = w
+        line = 0
+        val min = w * INITIAL_STRIP_LINES
+        if (pixels.size < min) pixels = IntArray(min)
+        else pixels.fill(0)
+        height = pixels.size / w
+    }
+
+    fun canAppend(extra: Int): Boolean = line >= 0 && line + extra <= MAX_STRIP_LINES
+
+    fun ensureLines(extra: Int) {
+        val written = line.coerceAtLeast(0)
+        val need = (written + extra) * width
+        if (need <= pixels.size) {
+            height = pixels.size / width
+            return
+        }
+        val capLines = minOf(MAX_STRIP_LINES, maxOf(written + extra, (pixels.size / width.coerceAtLeast(1)) * 2))
+        val grown = IntArray(width * capLines)
+        if (written > 0) pixels.copyInto(grown, 0, 0, width * written)
+        pixels = grown
+        height = capLines
+    }
+
+    fun appendBlankLines(count: Int, color: Int = 0) {
+        if (!canAppend(count)) return
+        ensureLines(count)
+        val w = width
+        repeat(count) {
+            pixels.fill(color, line * w, (line + 1) * w)
+            line++
+        }
+    }
+
+    companion object {
+        const val INITIAL_STRIP_LINES = 512
+        const val MAX_STRIP_LINES = 8192
+    }
 }
 
 internal sealed interface SstvMode {

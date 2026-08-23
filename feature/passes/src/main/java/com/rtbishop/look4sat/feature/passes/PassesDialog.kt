@@ -386,7 +386,7 @@ internal fun TransponderDialog(
             horizontalArrangement = Arrangement.spacedBy(1.dp),
             verticalArrangement = Arrangement.spacedBy(1.dp)
         ) {
-            itemsIndexed(availableModes) { index, item ->
+            itemsIndexed((availableModes + modes.filter { it !in availableModes })) { index, item ->
                 FilterRow(
                     label = "${index + 1}).",
                     text = item,

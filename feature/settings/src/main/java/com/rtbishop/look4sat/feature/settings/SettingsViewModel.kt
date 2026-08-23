@@ -48,6 +48,7 @@ class SettingsViewModel(
             otherSettings = settingsRepo.otherSettings.value,
             rcSettings = settingsRepo.rcSettings.value,
             radioControlSettings = settingsRepo.radioControlSettings.value,
+            n76Settings = settingsRepo.n76Settings.value,
             dataSourcesSettings = settingsRepo.dataSourcesSettings.value,
             dataSourcesStatus = settingsRepo.dataSourcesStatus.value,
             pairedBluetoothDevices = container.providePairedBluetoothDevices()
@@ -103,6 +104,11 @@ class SettingsViewModel(
                 _uiState.update { it.copy(radioControlSettings = settings) }
             }
         }
+        viewModelScope.launch {
+            settingsRepo.n76Settings.collect { settings ->
+                _uiState.update { it.copy(n76Settings = settings) }
+            }
+        }
     }
 
 
@@ -134,6 +140,10 @@ class SettingsViewModel(
             // Remote control & data sources
             is SettingsAction.UpdateRC -> settingsRepo.updateRCSettings(action.settings)
             is SettingsAction.UpdateRadioControl -> settingsRepo.updateRadioControlSettings(action.settings)
+            is SettingsAction.UpdateN76 -> settingsRepo.updateN76Settings(action.settings)
+            SettingsAction.RefreshPairedBluetooth -> _uiState.update {
+                it.copy(pairedBluetoothDevices = container.providePairedBluetoothDevices())
+            }
             is SettingsAction.UpdateDataSources -> settingsRepo.updateDataSourcesSettings(action.settings)
             // System
             is SettingsAction.ShowToast -> showToast(action.message)

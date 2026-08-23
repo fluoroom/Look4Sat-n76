@@ -31,7 +31,6 @@ interface IMainContainer {
     val databaseRepo: IDatabaseRepo
     val amSatRepo: IAmSatRepository
     val radioTrackingService: IRadioTrackingService
-    val satlib: ISatlib
     fun provideAddToCalendar(): IAddToCalendar
     fun provideShowToast(): IShowToast
     fun provideBluetoothReporter(): IReporter

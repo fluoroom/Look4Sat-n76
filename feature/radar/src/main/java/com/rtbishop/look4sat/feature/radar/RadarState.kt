@@ -19,6 +19,7 @@ package com.rtbishop.look4sat.feature.radar
 
 import com.rtbishop.look4sat.core.domain.model.AudioSource
 import com.rtbishop.look4sat.core.domain.model.SatRadio
+import com.rtbishop.look4sat.core.domain.repository.N76RuntimeState
 import com.rtbishop.look4sat.core.domain.predict.CelestialComputer
 import com.rtbishop.look4sat.core.domain.predict.OrbitalPass
 import com.rtbishop.look4sat.core.domain.predict.OrbitalPos
@@ -64,6 +65,7 @@ data class RadarState(
     val moonPosition: CelestialComputer.MoonPosition? = null,
     val transceivers: TransceiverSubState = TransceiverSubState(),
     val radioControl: RadioControlSubState = RadioControlSubState(),
+    val n76: N76RuntimeState = N76RuntimeState(),
     val sstv: SstvSubState = SstvSubState(),
     val calculatorOffsetKHz: String = ""
 )
@@ -94,6 +96,13 @@ sealed interface RadarAction {
     data object ToggleTracking : RadarAction
     data object ConnectRadios : RadarAction
     data object DisconnectRadios : RadarAction
+    data class SetPtt(val on: Boolean) : RadarAction
+    data class SetN76Monitor(val on: Boolean) : RadarAction
+    data object N76RecordStart : RadarAction
+    data object N76RecordStop : RadarAction
+    data object N76PlayLast : RadarAction
+    data object N76StopPlayback : RadarAction
+    data class SetN76AutoRecord(val on: Boolean) : RadarAction
 
     // SSTV actions
     data object SstvStartRecording : RadarAction

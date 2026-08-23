@@ -29,6 +29,7 @@ import android.media.projection.MediaProjection
 import android.os.Build
 import androidx.annotation.RequiresApi
 import androidx.annotation.RequiresPermission
+import com.rtbishop.look4sat.core.data.framework.N76AudioBus
 import com.rtbishop.look4sat.core.domain.model.AudioSource
 import com.rtbishop.look4sat.core.domain.usecase.IAudioCapture
 import kotlinx.coroutines.Dispatchers
@@ -60,6 +61,10 @@ class AudioCapture(private val context: Context) : IAudioCapture {
 
     @RequiresPermission(android.Manifest.permission.RECORD_AUDIO)
     override fun audioFlow(source: AudioSource, captureToken: Any?): Flow<FloatArray> = flow {
+        if (source == AudioSource.N76Ht) {
+            N76AudioBus.pcm.collect { emit(it) }
+            return@flow
+        }
         val audioManager = context.getSystemService(AudioManager::class.java)
         // Internal capture is stereo (the system mixed output is always 2 channels);
         // other sources record mono directly.
@@ -75,13 +80,13 @@ class AudioCapture(private val context: Context) : IAudioCapture {
                         delay(1500L)
                         MediaRecorder.AudioSource.MIC
                     }
-                    // AudioSource.Internal is handled by the outer when branch above;
-                    // Kotlin 2.4 smart-casts source here so this branch is truly unreachable.
-                    AudioSource.Internal -> error("unreachable")
+                    // AudioSource.Internal / N76Ht are handled by the outer when / early return.
+                    AudioSource.Internal, AudioSource.N76Ht -> error("unreachable")
                 }
                 AudioRecord(androidSource, sampleRate, channelConfig, audioFormat, bufferSize * 4)
             }
             AudioSource.Internal -> buildInternalAudioRecord(captureToken)
+            AudioSource.N76Ht -> error("unreachable")
         }
         check(recorder.state == AudioRecord.STATE_INITIALIZED) {
             "AudioRecord failed to initialize for source: ${source.label}"

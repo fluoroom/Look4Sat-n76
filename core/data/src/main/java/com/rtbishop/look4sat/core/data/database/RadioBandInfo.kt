@@ -17,5 +17,11 @@
  */
 package com.rtbishop.look4sat.core.data.database
 
-/** Partial projection used by [Look4SatDao.getRadiosForBandFilter]. */
-data class RadioBandInfo(val catnum: Int?, val downlinkLow: Long?, val uplinkLow: Long?)
+/** Partial projection used by [Look4SatDao.getRadiosForFilter]. */
+data class RadioBandInfo(
+    val catnum: Int?,
+    val downlinkLow: Long?,
+    val uplinkLow: Long?,
+    val downlinkMode: String?,
+    val info: String
+)

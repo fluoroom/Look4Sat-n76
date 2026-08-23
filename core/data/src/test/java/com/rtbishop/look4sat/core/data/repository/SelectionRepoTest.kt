@@ -22,6 +22,7 @@ import com.rtbishop.look4sat.core.domain.model.DatabaseState
 import com.rtbishop.look4sat.core.domain.model.OtherSettings
 import com.rtbishop.look4sat.core.domain.model.PassesSettings
 import com.rtbishop.look4sat.core.domain.model.RCSettings
+import com.rtbishop.look4sat.core.domain.model.N76Settings
 import com.rtbishop.look4sat.core.domain.model.RadioControlSettings
 import com.rtbishop.look4sat.core.domain.model.SatItem
 import com.rtbishop.look4sat.core.domain.model.SatRadio
@@ -44,7 +45,7 @@ class SelectionRepoTest {
     private val dispatcher = StandardTestDispatcher()
 
     @Test
-    fun `unknown mode values do not crash and do not filter out entries`() = runTest(dispatcher) {
+    fun `unknown mode values do not crash and hide unmatched entries`() = runTest(dispatcher) {
         val localSource = FakeLocalSource(
             entries = listOf(
                 SatItem(25544, "ISS (ZARYA)", false),
@@ -59,7 +60,7 @@ class SelectionRepoTest {
 
         val items = flow.first()
 
-        assertEquals(listOf(25544, 40967), items.map { it.catnum })
+        assertEquals(emptyList<Int>(), items.map { it.catnum })
         assertEquals(listOf("REMOVED_MODE"), repository.getCurrentModes())
     }
 
@@ -100,6 +101,8 @@ class SelectionRepoTest {
         override suspend fun getIdsWithModes(modes: List<String>): List<Int> = emptyList()
 
         override suspend fun getIdsWithBands(bands: List<String>): List<Int> = emptyList()
+
+        override suspend fun getIdsMatchingFilters(modes: List<String>, bands: List<String>): List<Int> = emptyList()
 
         override suspend fun getAvailableModes(ids: List<Int>): List<String> = emptyList()
 
@@ -148,6 +151,8 @@ class SelectionRepoTest {
             RadioControlSettings(false, RadioControlSettings.MODEL_YAESU_FT817, "", "", "", "", 9600)
         )
 
+        override val n76Settings: StateFlow<N76Settings> = MutableStateFlow(N76Settings())
+
         override fun setSelectedIds(ids: List<Int>) = Unit
 
         override fun setSelectedSatModes(modes: List<String>) {
@@ -175,6 +180,8 @@ class SelectionRepoTest {
         override fun updateDataSourcesStatus(status: Map<String, Int>) = Unit
 
         override fun updateRadioControlSettings(settings: RadioControlSettings) = Unit
+
+        override fun updateN76Settings(settings: N76Settings) = Unit
 
         override fun getSatelliteOffset(catnum: Int): String = ""
 

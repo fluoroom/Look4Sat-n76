@@ -65,3 +65,5 @@ fastlane/readme.md
 /app/release/
 /.kotlin/sessions/
 .hermes/
+
+buildtana.sh

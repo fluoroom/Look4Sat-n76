@@ -47,20 +47,28 @@ interface Look4SatDao {
 
     @Query(
         """
-        SELECT DISTINCT catnum FROM radios WHERE isAlive = 1
-        AND (downlinkMode IN (:modes) OR uplinkMode IN (:modes))
+        SELECT DISTINCT catnum FROM radios
+        WHERE isAlive = 1 AND catnum IS NOT NULL AND downlinkLow IS NOT NULL
+        AND info LIKE '%APRS%'
         """
     )
-    suspend fun getIdsWithModes(modes: List<String>): List<Int>
-
-    @Query("SELECT DISTINCT catnum FROM radios WHERE info LIKE '%APRS%' AND catnum IS NOT NULL")
     suspend fun getIdsWithAprs(): List<Int>
 
-    @Query("SELECT DISTINCT downlinkMode FROM radios WHERE catnum IN (:ids) AND downlinkMode IS NOT NULL")
+    @Query(
+        """
+        SELECT DISTINCT downlinkMode FROM radios
+        WHERE catnum IN (:ids) AND isAlive = 1 AND downlinkLow IS NOT NULL AND downlinkMode IS NOT NULL
+        """
+    )
     suspend fun getModesForIds(ids: List<Int>): List<String>
 
-    @Query("SELECT catnum, downlinkLow, uplinkLow FROM radios WHERE isAlive = 1 AND catnum IS NOT NULL")
-    suspend fun getRadiosForBandFilter(): List<RadioBandInfo>
+    @Query(
+        """
+        SELECT catnum, downlinkLow, uplinkLow, downlinkMode, info
+        FROM radios WHERE isAlive = 1 AND catnum IS NOT NULL
+        """
+    )
+    suspend fun getRadiosForFilter(): List<RadioBandInfo>
 
     @Query("SELECT COUNT(*) FROM radios")
     suspend fun getRadiosTotal(): Int

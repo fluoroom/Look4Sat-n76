@@ -141,7 +141,7 @@ class SstvDecoder(
 
     private fun emitFrame() {
         val imageWidth = imageBuffer.width
-        val imageHeight = imageBuffer.height
+        val imageHeight = imageBuffer.line.coerceAtLeast(0)
         val quality = decoder.quality()
         if (enableDiagnosticsHandle) {
             _qualityMetrics.value = SstvQualityMetrics(
@@ -151,11 +151,9 @@ class SstvDecoder(
                 timingErrorSamples = quality.timingErrorSamples
             )
         }
-        val imageComplete = imageBuffer.line >= imageHeight && imageBuffer.line > 0
-        // Copy only the active image region — imageBuffer.pixels is pre-allocated
-        // at the maximum possible size (PD-290: 800×616), so we must not copyOf()
-        // the entire array and send padding pixels to the observer.
-        val imagePixels = if (imageBuffer.line > 0) imageBuffer.pixels.copyOf(imageWidth * imageHeight) else null
+        val frameHeight = decoder.currentMode.height
+        val imageComplete = imageHeight > 0 && frameHeight > 0 && imageHeight >= frameHeight
+        val imagePixels = if (imageHeight > 0) imageBuffer.pixels.copyOf(imageWidth * imageHeight) else null
         val modeName = decoder.currentMode.name
         val scopePixels = if (includeScopeData) scopeBuffer.pixels.copyOf() else null
         val scopeWidth = if (includeScopeData) scopeBuffer.width else 0
@@ -490,11 +488,11 @@ internal class DecoderEngine(
 
     fun setMode(name: String) {
         val mode = allModes.firstOrNull { it.name == name }
-        if (mode == currentMode) {
-            lockMode = true; return
-        }
         if (mode != null) {
-            lockMode = true; imageBuffer.line = -1; currentMode = mode; curLineSamples = mode.scanLineSamples; return
+            lockMode = true
+            currentMode = mode
+            curLineSamples = mode.scanLineSamples
+            return
         }
         lockMode = false
     }
@@ -592,19 +590,26 @@ internal class DecoderEngine(
 
     private fun copyLines(ok: Boolean) {
         if (!ok) return
-        var finish = false
-        if (imageBuffer.line in 0 until imageBuffer.height && imageBuffer.width == pixelBuffer.width) {
+        if (imageBuffer.line >= 0 && imageBuffer.width == pixelBuffer.width &&
+            imageBuffer.canAppend(pixelBuffer.height)
+        ) {
+            imageBuffer.ensureLines(pixelBuffer.height)
             val w = imageBuffer.width
             for (row in 0 until pixelBuffer.height) {
-                if (imageBuffer.line >= imageBuffer.height) break
                 pixelBuffer.pixels.copyInto(imageBuffer.pixels, imageBuffer.line * w, row * w, row * w + w)
                 imageBuffer.line++
             }
-            finish = imageBuffer.line == imageBuffer.height
         }
         val scale = scopeBuffer.width / pixelBuffer.width
         if (scale <= 1) copyUnscaled() else copyScaled(scale)
-        if (finish) drawLines(0xff000000.toInt(), 10)
+    }
+
+    private fun beginStrip(mode: SstvMode, separatorIfContinuing: Boolean) {
+        if (imageBuffer.line < 0 || imageBuffer.width != mode.width) {
+            imageBuffer.startStrip(mode.width)
+        } else if (separatorIfContinuing && imageBuffer.line > 0) {
+            imageBuffer.appendBlankLines(8)
+        }
     }
 
     private fun decodePredictedLine(): Boolean {
@@ -726,8 +731,7 @@ internal class DecoderEngine(
         }
         if (lockMode && mode != currentMode) return false
         mode.resetState()
-        imageBuffer.width = mode.width; imageBuffer.height = mode.height
-        imageBuffer.pixels.fill(0, 0, mode.width * mode.height); imageBuffer.line = 0
+        beginStrip(mode, separatorIfContinuing = true)
         currentMode = mode
         lastSync = sIdx + mode.firstSyncPulseIndex; curLineSamples = mode.scanLineSamples; lastOffset = ldrOffset
         var oldest = lastSync - (pulses.size - 1) * curLineSamples
@@ -759,21 +763,25 @@ internal class DecoderEngine(
         if (lineSamples < scanLineMin || lineSamples > scratch.size) return false
         if (stdDev(lineLen, m) > lineTolerance) return false
         var changed = false
-        if (lockMode || imageBuffer.line in 0 until imageBuffer.height) {
+        if (lockMode || imageBuffer.line >= 0) {
             if (currentMode != rawMode && abs(lineSamples - currentMode.scanLineSamples) > lineTolerance) return false
-            // Try continuous decoding
-            if (lockMode && imageBuffer.line == -1 && currentMode != rawMode) {
+            if (imageBuffer.line < 0 && currentMode != rawMode) {
                 currentMode.resetState()
-                imageBuffer.width = currentMode.width
-                imageBuffer.height = currentMode.height
-                imageBuffer.pixels.fill(0, 0, currentMode.width * currentMode.height)
-                imageBuffer.line = 0
+                beginStrip(currentMode, separatorIfContinuing = false)
                 drawLines(0xff000000.toInt(), 10); drawLines(0xffffff00.toInt(), 8); drawLines(0xff000000.toInt(), 10)
             }
         } else {
-            val prev = currentMode; currentMode = detectMode(modes, lineSamples)
-            changed =
-                currentMode != prev || abs(curLineSamples - lineSamples) > lineTolerance || abs(lastSync + lineSamples - syncPulses.last()) > syncTolerance
+            val detected = detectMode(modes, lineSamples)
+            if (detected == rawMode) return false
+            changed = detected != currentMode ||
+                abs(curLineSamples - lineSamples) > lineTolerance ||
+                abs(lastSync + lineSamples - syncPulses.last()) > syncTolerance
+            currentMode = detected
+            if (imageBuffer.line < 0) {
+                currentMode.resetState()
+                beginStrip(currentMode, separatorIfContinuing = false)
+                drawLines(0xff000000.toInt(), 10); drawLines(0xff00ffff.toInt(), 8); drawLines(0xff000000.toInt(), 10)
+            }
         }
         if (changed) {
             drawLines(0xff000000.toInt(), 10); drawLines(0xff00ffff.toInt(), 8); drawLines(0xff000000.toInt(), 10)

@@ -17,6 +17,8 @@
  */
 package com.rtbishop.look4sat.core.domain.utility
 
+import com.rtbishop.look4sat.core.domain.model.SatRadio
+
 // Band letter assigned to a frequency in Hz.
 // Boundaries follow ITU designations; L/S are split from the wider UHF range
 // so that 430 MHz → "U" and 1.27 GHz → "L" as expected in amateur radio.
@@ -44,3 +46,26 @@ val allBandConfigs: List<String> = listOf(
     "V/V", "V/U", "U/V", "U/U",
     "L/V", "L/U", "S/V", "S/U"
 )
+
+// Same predicate used for pass inclusion and the radar transponder list.
+// A satellite is kept only if it has at least one radio that would actually be shown:
+// alive downlink, selected mode (downlink or APRS-in-info), and selected band on that same radio.
+fun matchesTransponderFilter(
+    downlinkMode: String?,
+    info: String,
+    downlinkLow: Long?,
+    uplinkLow: Long?,
+    modes: List<String>,
+    bands: List<String>
+): Boolean {
+    if (downlinkLow == null) return false
+    val modeOk = modes.isEmpty() ||
+        (downlinkMode != null && downlinkMode in modes) ||
+        ("APRS" in modes && info.contains("APRS", ignoreCase = true))
+    if (!modeOk) return false
+    if (bands.isEmpty()) return true
+    return transponderBandConfig(downlinkLow, uplinkLow) in bands
+}
+
+fun SatRadio.matchesTransponderFilter(modes: List<String>, bands: List<String>): Boolean =
+    matchesTransponderFilter(downlinkMode, info, downlinkLow, uplinkLow, modes, bands)

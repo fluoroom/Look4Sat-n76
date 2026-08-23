@@ -18,7 +18,9 @@
 package com.rtbishop.look4sat.core.data.framework
 
 import android.bluetooth.BluetoothManager
+import android.content.Context
 import android.util.Log
+import com.rtbishop.look4sat.core.domain.model.BluetoothAddress
 import com.rtbishop.look4sat.core.domain.model.RadioControlSettings
 import com.rtbishop.look4sat.core.domain.model.SatRadio
 import com.rtbishop.look4sat.core.domain.predict.OrbitalPass
@@ -27,6 +29,7 @@ import com.rtbishop.look4sat.core.domain.repository.IRadioController
 import com.rtbishop.look4sat.core.domain.repository.IRadioTrackingService
 import com.rtbishop.look4sat.core.domain.repository.ISatelliteRepo
 import com.rtbishop.look4sat.core.domain.repository.ISettingsRepo
+import com.rtbishop.look4sat.core.domain.repository.N76RuntimeState
 import com.rtbishop.look4sat.core.domain.repository.RadioTrackingState
 import com.rtbishop.look4sat.core.domain.utility.TransponderMapper
 import kotlinx.coroutines.CoroutineScope
@@ -38,12 +41,14 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 class RadioTrackingService(
     private val appScope: CoroutineScope,
     private val bluetoothManager: BluetoothManager,
     private val satelliteRepo: ISatelliteRepo,
-    private val settingsRepo: ISettingsRepo
+    private val settingsRepo: ISettingsRepo,
+    context: Context
 ) : IRadioTrackingService {
 
     private val tag = "RadioTracking"
@@ -52,23 +57,72 @@ class RadioTrackingService(
     private val _state = MutableStateFlow(RadioTrackingState())
     override val state: StateFlow<RadioTrackingState> = _state
 
+    private val _n76State = MutableStateFlow(
+        N76RuntimeState(
+            isN76 = settingsRepo.radioControlSettings.value.radioModel == RadioControlSettings.MODEL_N76,
+            monitorOn = settingsRepo.n76Settings.value.speakerMonitor,
+            autoRecord = settingsRepo.n76Settings.value.recordSatOnly
+        )
+    )
+    override val n76State: StateFlow<N76RuntimeState> = _n76State
+
+    private val n76Link = N76Link(context).apply {
+        onLog = { line ->
+            Log.d("N76", line)
+            _n76State.update { it.copy(logs = (it.logs + line).takeLast(80)) }
+        }
+        onAudioActive = { active -> _n76State.update { it.copy(audioActive = active) } }
+        onRecordingChanged = { rec -> _n76State.update { it.copy(recording = rec) } }
+        onPlayingChanged = { play -> _n76State.update { it.copy(playing = play) } }
+        onSaved = { path -> _n76State.update { it.copy(lastRecordPath = path) } }
+    }
+
     private var txController: IRadioController? = null
     private var rxController: IRadioController? = null
     private var trackingJob: Job? = null
+    private var n76SatActive = false
 
     // ── Connection ──────────────────────────────────────────────────────────
 
     override suspend fun connectRadios() {
         txController?.disconnect()
         rxController?.disconnect()
+        n76Link.disconnect()
+        n76SatActive = false
 
         val rcSettings = settingsRepo.radioControlSettings.value
         val txAddr     = rcSettings.txRadioAddress
         val rxAddr     = rcSettings.rxRadioAddress
+        val isN76      = rcSettings.radioModel == RadioControlSettings.MODEL_N76
         val isIcom     = rcSettings.radioModel == RadioControlSettings.MODEL_ICOM_IC705
         val isSplit    = isIcom && rcSettings.splitMode
+        _n76State.update {
+            it.copy(
+                isN76 = isN76,
+                monitorOn = settingsRepo.n76Settings.value.speakerMonitor,
+                autoRecord = settingsRepo.n76Settings.value.recordSatOnly,
+                logs = emptyList()
+            )
+        }
 
         Log.i(tag, "connectRadios model=${rcSettings.radioModel} split=$isSplit TX=$txAddr RX=$rxAddr")
+
+        if (isN76) {
+            if (txAddr.isBlank() || !BluetoothAddress.isValid(txAddr)) {
+                _state.update { it.copy(errorMessage = "Set a valid N76 MAC in Settings (type or scan)") }
+                return
+            }
+            _state.update { it.copy(errorMessage = null) }
+            val ok = n76Link.connect(txAddr, settingsRepo.n76Settings.value)
+            _state.update {
+                it.copy(
+                    txConnected = ok,
+                    rxConnected = ok,
+                    errorMessage = if (!ok) "Could not connect to N76 ($txAddr)" else null
+                )
+            }
+            return
+        }
 
         if (isSplit) {
             // Single-radio split mode: only TX slot is used
@@ -123,11 +177,14 @@ class RadioTrackingService(
 
     override suspend fun disconnectRadios() {
         stopTracking()
+        n76Link.disconnect()
+        n76SatActive = false
         txController?.disconnect()
         rxController?.disconnect()
         txController = null
         rxController = null
         _state.update { it.copy(txConnected = false, rxConnected = false, isActive = false) }
+        _n76State.update { it.copy(audioActive = false, recording = false, playing = false) }
     }
 
     // ── Tracking ────────────────────────────────────────────────────────────
@@ -144,10 +201,13 @@ class RadioTrackingService(
         trackingJob?.cancel()
 
         val rcSettings = settingsRepo.radioControlSettings.value
+        val isN76      = rcSettings.radioModel == RadioControlSettings.MODEL_N76
         val isIcom     = rcSettings.radioModel == RadioControlSettings.MODEL_ICOM_IC705
         val isSplit    = isIcom && rcSettings.splitMode
 
-        if (isSplit) {
+        if (isN76) {
+            trackingJob = appScope.launch { runN76Tracking() }
+        } else if (isSplit) {
             trackingJob = appScope.launch { runSplitTracking(transponder, txBaseFreqHz) }
         } else {
             trackingJob = appScope.launch { runDualRadioTracking(transponder, txBaseFreqHz) }
@@ -480,6 +540,12 @@ class RadioTrackingService(
     override fun stopTracking() {
         trackingJob?.cancel()
         trackingJob = null
+        if (n76SatActive) {
+            n76Link.exitSatMode()
+            n76SatActive = false
+        }
+        val n76 = settingsRepo.n76Settings.value
+        if (n76.recordSatOnly && n76Link.isRecording) n76Link.stopRecording()
         _state.update { it.copy(isActive = false) }
     }
 
@@ -553,4 +619,133 @@ class RadioTrackingService(
         }
         _state.update { it.copy(txMode = txMode, rxMode = rxMode) }
     }
+
+    override fun setPtt(on: Boolean) {
+        if (settingsRepo.radioControlSettings.value.radioModel == RadioControlSettings.MODEL_N76) {
+            n76Link.setPtt(on)
+            return
+        }
+        appScope.launch {
+            if (on) txController?.pttOn() else txController?.pttOff()
+        }
+    }
+
+    override fun setN76Monitor(on: Boolean) {
+        n76Link.setMonitor(on)
+        _n76State.update { it.copy(monitorOn = on) }
+        settingsRepo.updateN76Settings(settingsRepo.n76Settings.value.copy(speakerMonitor = on))
+    }
+
+    override fun startN76Recording() {
+        val settings = settingsRepo.n76Settings.value
+        val satName = _state.value.currentPass?.name.orEmpty()
+        n76Link.startRecording(settings, satName)
+    }
+
+    override fun stopN76Recording() {
+        n76Link.stopRecording()
+    }
+
+    override fun playLastN76Recording() {
+        val path = _n76State.value.lastRecordPath ?: run {
+            n76Link.onLog?.invoke("play: no recording yet")
+            return
+        }
+        n76Link.playLast(path)
+    }
+
+    override fun stopN76Playback() {
+        n76Link.stopPlayback()
+    }
+
+    private suspend fun runN76Tracking() {
+        val n76 = settingsRepo.n76Settings.value
+        val satName = _state.value.currentPass?.name.orEmpty()
+        if (n76.recordSatOnly && (n76.recordHt || n76.recordMic)) {
+            n76Link.startRecording(n76, satName)
+        }
+        try {
+            while (currentCoroutineContext().isActive) {
+                val currentState = _state.value
+                if (!currentState.isActive) break
+                val satPass = currentState.currentPass ?: break
+                val xpdr = currentState.selectedTransponder ?: break
+                val txBaseFreq = currentState.txBaseFrequencyHz
+                val stationPos = settingsRepo.stationPosition.value
+                val pos = satelliteRepo.getPosition(satPass.orbitalObject, stationPos, System.currentTimeMillis())
+                val txRadioFreq = txBaseFreq?.let { pos.getUplinkFreq(it) }
+                val rxBaseFreq = if (txBaseFreq != null) {
+                    TransponderMapper.mapUplinkToDownlink(txBaseFreq, xpdr)
+                } else xpdr.downlinkLow
+                val rxRadioFreq = rxBaseFreq?.let { pos.getDownlinkFreq(it) }
+                val live = settingsRepo.n76Settings.value
+
+                if (live.sendSatInfo && n76Link.isConnected) {
+                    sendN76Packets(satPass, pos.azimuth, pos.elevation, pos.distance, pos.altitude, txRadioFreq, rxRadioFreq)
+                }
+
+                _state.update {
+                    it.copy(
+                        txConnected = n76Link.isConnected,
+                        rxConnected = n76Link.isConnected,
+                        txFrequencyHz = txRadioFreq,
+                        rxFrequencyHz = rxRadioFreq,
+                        azimuth = Math.toDegrees(pos.azimuth),
+                        elevation = Math.toDegrees(pos.elevation),
+                        distance = pos.distance
+                    )
+                }
+                delay(live.pollIntervalMs.coerceIn(250L, 3000L))
+            }
+        } finally {
+            if (n76SatActive) {
+                n76Link.exitSatMode()
+                n76SatActive = false
+            }
+            if (n76.recordSatOnly) n76Link.stopRecording()
+        }
+    }
+
+    private fun sendN76Packets(
+        pass: OrbitalPass,
+        azimuthRad: Double,
+        elevationRad: Double,
+        distanceKm: Double,
+        altitudeKm: Double,
+        txHz: Long?,
+        rxHz: Long?
+    ) {
+        val n76 = settingsRepo.n76Settings.value
+        val rx = rxHz ?: 0L
+        val tx = txHz ?: 0L
+        if (!isValidN76Freq(rx) || !isValidN76Freq(tx)) {
+            if (n76SatActive) {
+                n76Link.exitSatMode()
+                n76SatActive = false
+            }
+            return
+        }
+        val tone = _state.value.ctcssTone
+        val defaultSub = if (tone != null && tone > 0) (tone * 100).roundToInt() else 0
+        val rxSub = if (n76.forceRxCtcss) n76.forceRxCtcssHzx100 else defaultSub
+        val txSub = if (n76.forceTxCtcss) n76.forceTxCtcssHzx100 else defaultSub
+        val nowMs = System.currentTimeMillis()
+        val aosSec = if (pass.aosTime > 0) {
+            ((pass.aosTime - nowMs) / 1000L).toInt().coerceIn(0, 65534)
+        } else 65535
+        n76Link.send(
+            N76Protocol.satInfoPacket(
+                name = pass.name,
+                az = Math.toDegrees(azimuthRad).roundToInt(),
+                el = Math.toDegrees(elevationRad).roundToInt().coerceAtLeast(0),
+                dist = distanceKm.roundToInt(),
+                alt = altitudeKm.roundToInt(),
+                aos = aosSec
+            )
+        )
+        n76Link.send(N76Protocol.freqModePacket(rx, tx, rxSub, txSub, n76.satFirmware))
+        n76SatActive = true
+    }
+
+    private fun isValidN76Freq(hz: Long) = hz == 0L || hz in 136_000_000L..520_000_000L
 }

@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -33,6 +34,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
@@ -41,8 +44,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -200,9 +206,21 @@ internal fun SstvPage(
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        // Decoded image or placeholder — centered in available space
         val frame = sstv.currentFrame
         val pixels = frame?.imagePixels
+        val scrollState = rememberScrollState()
+        var followLive by remember { mutableStateOf(true) }
+        LaunchedEffect(frame == null) {
+            if (frame == null) followLive = true
+        }
+        LaunchedEffect(scrollState.isScrollInProgress) {
+            if (!scrollState.isScrollInProgress) {
+                followLive = scrollState.value >= scrollState.maxValue - 80
+            }
+        }
+        LaunchedEffect(frame?.imageHeight, scrollState.maxValue, followLive) {
+            if (followLive) scrollState.scrollTo(scrollState.maxValue)
+        }
         if (pixels != null && frame.imageWidth > 0 && frame.imageHeight > 0) {
             val bitmap = remember(pixels, frame.imageWidth, frame.imageHeight) {
                 Bitmap.createBitmap(
@@ -212,14 +230,19 @@ internal fun SstvPage(
                     Bitmap.Config.ARGB_8888
                 ).asImageBitmap()
             }
-            Image(
-                bitmap = bitmap,
-                contentDescription = "Decoded SSTV image",
-                contentScale = ContentScale.Fit,
+            Column(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .align(Alignment.Center)
-            )
+                    .fillMaxWidth()
+                    .verticalScroll(scrollState)
+            ) {
+                Image(
+                    bitmap = bitmap,
+                    contentDescription = "Decoded SSTV image",
+                    contentScale = ContentScale.FillWidth,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(168.dp))
+            }
         } else {
             Text(
                 text = when {

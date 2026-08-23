@@ -286,7 +286,6 @@ class PassesViewModel(
                 showDeepSpace = showDeepSpace
             )
         }
-        recalculatePasses()
     }
 
     private fun setTransponderFilter(modes: List<String>, bands: List<String>) = viewModelScope.launch {
@@ -295,7 +294,6 @@ class PassesViewModel(
             settingsRepo.passesSettings.value.copy(selectedBands = bands)
         )
         _uiState.update { it.copy(modes = modes, bands = bands) }
-        recalculatePasses(modes, bands)
     }
 
     private suspend fun recalculatePasses(

@@ -22,6 +22,17 @@ import com.rtbishop.look4sat.core.domain.predict.OrbitalObject
 import com.rtbishop.look4sat.core.domain.predict.OrbitalPass
 import kotlinx.coroutines.flow.StateFlow
 
+data class N76RuntimeState(
+    val isN76: Boolean = false,
+    val logs: List<String> = emptyList(),
+    val audioActive: Boolean = false,
+    val recording: Boolean = false,
+    val playing: Boolean = false,
+    val monitorOn: Boolean = false,
+    val autoRecord: Boolean = false,
+    val lastRecordPath: String? = null
+)
+
 data class RadioTrackingState(
     val isActive: Boolean = false,
     val txConnected: Boolean = false,
@@ -42,6 +53,7 @@ data class RadioTrackingState(
 
 interface IRadioTrackingService {
     val state: StateFlow<RadioTrackingState>
+    val n76State: StateFlow<N76RuntimeState>
 
     suspend fun connectRadios()
     suspend fun disconnectRadios()
@@ -52,4 +64,10 @@ interface IRadioTrackingService {
     fun adjustTxBaseFrequency(deltaHz: Long)
     fun setCtcssTone(toneHz: Double?)
     fun setMode(txMode: String, rxMode: String)
+    fun setPtt(on: Boolean)
+    fun setN76Monitor(on: Boolean)
+    fun startN76Recording()
+    fun stopN76Recording()
+    fun playLastN76Recording()
+    fun stopN76Playback()
 }

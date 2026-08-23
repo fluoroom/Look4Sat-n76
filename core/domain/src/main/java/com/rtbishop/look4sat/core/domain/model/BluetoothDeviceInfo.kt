@@ -17,23 +17,14 @@
  */
 package com.rtbishop.look4sat.core.domain.model
 
-data class SatApiData(
-    val version: Int = 1,
-    val satName: String = "",
-    val catNum: Int = 0,
-    val azimuthDeg: Double = 0.0,
-    val elevationDeg: Double = 0.0,
-    val altitudeKm: Double = 0.0,
-    val distanceKm: Double = 0.0,
-    val subSatLatDeg: Double = 0.0,
-    val subSatLonDeg: Double = 0.0,
-    val aboveHorizon: Boolean = false,
-    val txFrequencyHz: Long? = null,
-    val rxFrequencyHz: Long? = null,
-    val ctcssTxToneHz: Double? = null,
-    val ctcsRxToneHz: Double? = null,
-    val mode: String? = null,
-    val aosTime: Long = 0L,
-    val losTime: Long = 0L,
-    val timestamp: Long = 0L
-)
+object BluetoothAddress {
+    private val macRegex = Regex("([0-9A-F]{2}:){5}[0-9A-F]{2}")
+
+    fun normalize(raw: String): String {
+        val hex = raw.filter { it.isLetterOrDigit() }.uppercase()
+        if (hex.length != 12 || hex.any { it !in "0123456789ABCDEF" }) return raw.trim().uppercase()
+        return hex.chunked(2).joinToString(":")
+    }
+
+    fun isValid(raw: String): Boolean = macRegex.matches(normalize(raw))
+}

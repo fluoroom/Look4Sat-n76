@@ -22,7 +22,7 @@ import com.rtbishop.look4sat.core.domain.model.SatRadio
 import com.rtbishop.look4sat.core.domain.predict.OrbitalData
 import com.rtbishop.look4sat.core.domain.predict.OrbitalObject
 import com.rtbishop.look4sat.core.domain.source.ILocalSource
-import com.rtbishop.look4sat.core.domain.utility.transponderBandConfig
+import com.rtbishop.look4sat.core.domain.utility.matchesTransponderFilter
 import com.rtbishop.look4sat.core.data.database.entity.SatEntry as FrameworkEntry
 import com.rtbishop.look4sat.core.data.database.entity.SatRadio as FrameworkRadio
 import com.rtbishop.look4sat.core.domain.model.SatRadio as DomainRadio
@@ -48,11 +48,29 @@ class LocalSource(private val look4SatDao: Look4SatDao) : ILocalSource {
 
     override suspend fun deleteEntries() = look4SatDao.deleteEntries()
 
-    override suspend fun getIdsWithModes(modes: List<String>): List<Int> {
-        val regularModes = modes.filter { it != "APRS" }
-        val regular = if (regularModes.isNotEmpty()) look4SatDao.getIdsWithModes(regularModes) else emptyList()
-        val aprs = if ("APRS" in modes) look4SatDao.getIdsWithAprs() else emptyList()
-        return (regular + aprs).distinct()
+    override suspend fun getIdsWithModes(modes: List<String>): List<Int> =
+        getIdsMatchingFilters(modes, emptyList())
+
+    override suspend fun getIdsWithBands(bands: List<String>): List<Int> =
+        getIdsMatchingFilters(emptyList(), bands)
+
+    // Scan ~thousands of radios in memory. Fine at current DB size; move to SQL if this grows.
+    override suspend fun getIdsMatchingFilters(modes: List<String>, bands: List<String>): List<Int> {
+        if (modes.isEmpty() && bands.isEmpty()) return emptyList()
+        return look4SatDao.getRadiosForFilter()
+            .mapNotNull { radio ->
+                val catnum = radio.catnum ?: return@mapNotNull null
+                if (matchesTransponderFilter(
+                        downlinkMode = radio.downlinkMode,
+                        info = radio.info,
+                        downlinkLow = radio.downlinkLow,
+                        uplinkLow = radio.uplinkLow,
+                        modes = modes,
+                        bands = bands
+                    )
+                ) catnum else null
+            }
+            .distinct()
     }
 
     override suspend fun getAvailableModes(ids: List<Int>): List<String> {
@@ -60,18 +78,6 @@ class LocalSource(private val look4SatDao: Look4SatDao) : ILocalSource {
         val modes = ids.chunked(999).flatMap { look4SatDao.getModesForIds(it) }.distinct().sorted()
         val aprsIds = look4SatDao.getIdsWithAprs().toHashSet()
         return if (ids.any { it in aprsIds }) (modes + "APRS").sorted() else modes
-    }
-
-    override suspend fun getIdsWithBands(bands: List<String>): List<Int> {
-        if (bands.isEmpty()) return emptyList()
-        val bandSet = bands.toHashSet()
-        return look4SatDao.getRadiosForBandFilter()
-            .mapNotNull { entry ->
-                val catnum = entry.catnum ?: return@mapNotNull null
-                val config = transponderBandConfig(entry.downlinkLow, entry.uplinkLow) ?: return@mapNotNull null
-                if (config in bandSet) catnum else null
-            }
-            .distinct()
     }
 
     private fun FrameworkEntry.toDomain() = OrbitalData(

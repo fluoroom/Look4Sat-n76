@@ -24,6 +24,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -45,6 +46,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ElevatedButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -52,6 +55,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -76,6 +80,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.rtbishop.look4sat.core.domain.model.SatRadio
 import com.rtbishop.look4sat.core.domain.predict.OrbitalPos
+import com.rtbishop.look4sat.core.domain.repository.N76RuntimeState
 import com.rtbishop.look4sat.core.domain.utility.DopplerFrequencyCalculator
 import com.rtbishop.look4sat.core.domain.utility.TransponderMapper
 import com.rtbishop.look4sat.core.presentation.CardButton
@@ -90,6 +95,7 @@ fun TransceiversPage(
     transceivers: List<SatRadio>,
     selectedUuid: String?,
     radioControl: RadioControlSubState,
+    n76: N76RuntimeState = N76RuntimeState(),
     onAction: (RadarAction) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -114,6 +120,7 @@ fun TransceiversPage(
                     radio = radio,
                     isExpanded = isExpanded,
                     radioControl = radioControl,
+                    n76 = n76,
                     onAction = onAction,
                     onToggle = { onAction(RadarAction.SelectTransmitter(radio.uuid)) }
                 )
@@ -217,6 +224,7 @@ private fun TransceiverItem(
     radio: SatRadio,
     isExpanded: Boolean,
     radioControl: RadioControlSubState,
+    n76: N76RuntimeState,
     onAction: (RadarAction) -> Unit,
     onToggle: () -> Unit
 ) {
@@ -307,6 +315,7 @@ private fun TransceiverItem(
             ExpandedRadioControl(
                 radio = radio,
                 radioControl = radioControl,
+                n76 = n76,
                 onAction = onAction
             )
         }
@@ -377,6 +386,7 @@ private fun UnifiedFrequencyRow(
 private fun ExpandedRadioControl(
     radio: SatRadio,
     radioControl: RadioControlSubState,
+    n76: N76RuntimeState,
     onAction: (RadarAction) -> Unit
 ) {
     Column(
@@ -515,6 +525,103 @@ private fun ExpandedRadioControl(
                 Text(text = msg, color = MaterialTheme.colorScheme.error, fontSize = 14.sp)
             }
         }
+
+        if (n76.isN76) {
+            N76DebugPanel(n76 = n76, onAction = onAction)
+        }
+    }
+}
+
+@Composable
+private fun N76DebugPanel(n76: N76RuntimeState, onAction: (RadarAction) -> Unit) {
+    Text(
+        text = "N76 debug",
+        fontWeight = FontWeight.Medium,
+        color = MaterialTheme.colorScheme.primary,
+        fontSize = 13.sp
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
+        val pttInteraction = remember { MutableInteractionSource() }
+        LaunchedEffect(pttInteraction) {
+            pttInteraction.interactions.collect { interaction ->
+                when (interaction) {
+                    is PressInteraction.Press -> onAction(RadarAction.SetPtt(true))
+                    is PressInteraction.Release, is PressInteraction.Cancel -> onAction(RadarAction.SetPtt(false))
+                }
+            }
+        }
+        ElevatedButton(
+            onClick = {},
+            interactionSource = pttInteraction,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+            ),
+            shape = MaterialTheme.shapes.small,
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+            modifier = Modifier.weight(1f)
+        ) {
+            Text("PTT hold", fontSize = 16.sp, textAlign = TextAlign.Center)
+        }
+        CardButton(
+            onClick = { onAction(RadarAction.SetN76Monitor(!n76.monitorOn)) },
+            text = if (n76.monitorOn) "Mon ON" else "Mon OFF",
+            modifier = Modifier.weight(1f)
+        )
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
+        if (n76.recording) {
+            CardButton(
+                onClick = { onAction(RadarAction.N76RecordStop) },
+                text = "Stop rec",
+                modifier = Modifier.weight(1f)
+            )
+        } else {
+            CardButton(
+                onClick = { onAction(RadarAction.N76RecordStart) },
+                text = "Record",
+                modifier = Modifier.weight(1f)
+            )
+        }
+        if (n76.playing) {
+            CardButton(
+                onClick = { onAction(RadarAction.N76StopPlayback) },
+                text = "Stop play",
+                modifier = Modifier.weight(1f)
+            )
+        } else {
+            CardButton(
+                onClick = { onAction(RadarAction.N76PlayLast) },
+                text = "Play last",
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+    Row(
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text("Auto-record while tracking", fontSize = 12.sp, modifier = Modifier.weight(1f))
+        Switch(
+            checked = n76.autoRecord,
+            onCheckedChange = { onAction(RadarAction.SetN76AutoRecord(it)) }
+        )
+    }
+    val status = buildString {
+        append(if (n76.audioActive) "HT audio ON" else "HT audio off")
+        if (n76.recording) append(" · REC")
+        n76.lastRecordPath?.let { append(" · ${it.substringAfterLast('/')}") }
+    }
+    Text(status, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    if (n76.logs.isNotEmpty()) {
+        Text(
+            text = n76.logs.takeLast(6).joinToString("\n"),
+            fontSize = 10.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 6,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 

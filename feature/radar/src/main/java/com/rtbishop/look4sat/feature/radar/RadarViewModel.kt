@@ -22,7 +22,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.rtbishop.look4sat.core.domain.model.AudioSource
-import com.rtbishop.look4sat.core.domain.model.SatApiData
+import com.rtbishop.look4sat.core.domain.model.RadioControlSettings
 import com.rtbishop.look4sat.core.domain.model.SatRadio
 import com.rtbishop.look4sat.core.domain.predict.CelestialComputer
 import com.rtbishop.look4sat.core.domain.predict.OrbitalObject
@@ -31,7 +31,6 @@ import com.rtbishop.look4sat.core.domain.predict.OrbitalPos
 import com.rtbishop.look4sat.core.domain.repository.IMainContainer
 import com.rtbishop.look4sat.core.domain.repository.IRadioTrackingService
 import com.rtbishop.look4sat.core.domain.repository.IReporter
-import com.rtbishop.look4sat.core.domain.repository.ISatlib
 import com.rtbishop.look4sat.core.domain.repository.ISatelliteRepo
 import com.rtbishop.look4sat.core.domain.repository.ISensorsRepo
 import com.rtbishop.look4sat.core.domain.repository.ISettingsRepo
@@ -44,7 +43,7 @@ import com.rtbishop.look4sat.core.domain.usecase.IShowToast
 import com.rtbishop.look4sat.core.domain.utility.round
 import com.rtbishop.look4sat.core.domain.utility.toDegrees
 import com.rtbishop.look4sat.core.domain.utility.toTimerString
-import com.rtbishop.look4sat.core.domain.utility.transponderBandConfig
+import com.rtbishop.look4sat.core.domain.utility.matchesTransponderFilter
 import com.rtbishop.look4sat.core.presentation.formatFrequency
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -52,6 +51,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -60,7 +62,6 @@ import kotlin.time.Duration.Companion.milliseconds
 class RadarViewModel(
     private val bluetoothReporter: IReporter,
     private val networkReporter: IReporter,
-    private val satlib: ISatlib,
     private val satelliteRepo: ISatelliteRepo,
     private val settingsRepo: ISettingsRepo,
     private val sensorsRepo: ISensorsRepo,
@@ -104,6 +105,7 @@ class RadarViewModel(
         collectStationPositionChanges()
         collectPassAndStartTickLoop()
         collectRadioTrackingState()
+        collectN76State()
     }
 
     // Starts sensor collection if not already running.
@@ -170,11 +172,17 @@ class RadarViewModel(
     private fun collectPassAndStartTickLoop() {
         viewModelScope.launch {
             val pass = findCurrentPass() ?: return@launch
-            val allRadios = loadPassData(pass)
-            while (isActive) {
-                tickPass(pass, allRadios)
-                delay(1000.milliseconds)
-            }
+            combine(
+                settingsRepo.selectedSatModes,
+                settingsRepo.passesSettings.map { it.selectedBands }.distinctUntilChanged()
+            ) { modes, bands -> modes to bands }
+                .collectLatest { (modes, bands) ->
+                    val allRadios = loadPassData(pass, modes, bands)
+                    while (isActive) {
+                        tickPass(pass, allRadios)
+                        delay(1000.milliseconds)
+                    }
+                }
         }
     }
 
@@ -186,23 +194,17 @@ class RadarViewModel(
     }
 
     // Loads transmitters and satellite track for pass, sets initial state, returns full radio list
-    private suspend fun loadPassData(pass: OrbitalPass): List<SatRadio> {
+    private suspend fun loadPassData(pass: OrbitalPass, modes: List<String>, bands: List<String>): List<SatRadio> {
         _uiState.update { it.copy(currentPass = pass) }
-        val settings = settingsRepo.passesSettings.value
-        val modes = settingsRepo.selectedSatModes.value
-        val bands = settings.selectedBands
-        val allRadios = satelliteRepo.getRadiosWithId(pass.catNum).filter { radio ->
-            val modeOk = modes.isEmpty() ||
-                (radio.downlinkMode != null && radio.downlinkMode in modes) ||
-                ("APRS" in modes && radio.info.contains("APRS", ignoreCase = true))
-            val bandOk = bands.isEmpty() || transponderBandConfig(radio.downlinkLow, radio.uplinkLow)?.let { it in bands } == true
-            modeOk && bandOk
-        }
-        transponders = allRadios.filter { it.downlinkLow != null }
-        if (allRadios.isNotEmpty()) {
-            val firstUuid = allRadios.first().uuid
-            _uiState.update { it.copy(transceivers = it.transceivers.copy(selectedUuid = firstUuid)) }
-            transponders.find { it.uuid == firstUuid }?.let { trackingService.setTransponder(it) }
+        val allRadios = satelliteRepo.getRadiosWithId(pass.catNum)
+            .filter { it.matchesTransponderFilter(modes, bands) }
+        transponders = allRadios
+        val previousUuid = _uiState.value.transceivers.selectedUuid
+        val selectedUuid = previousUuid?.takeIf { uuid -> allRadios.any { it.uuid == uuid } }
+            ?: allRadios.firstOrNull()?.uuid
+        _uiState.update { it.copy(transceivers = it.transceivers.copy(selectedUuid = selectedUuid)) }
+        if (selectedUuid != null && selectedUuid != previousUuid) {
+            transponders.find { it.uuid == selectedUuid }?.let { trackingService.setTransponder(it) }
         }
         if (!pass.isDeepSpace) {
             val track = satelliteRepo.getTrack(pass.orbitalObject, stationPos, pass.aosTime, pass.losTime)
@@ -233,7 +235,6 @@ class RadarViewModel(
         }
         processRadios(allRadios, pass.orbitalObject, timeNow)
         sendPassData(pos)
-        if (_uiState.value.radioControl.isTracking) pushSatApiData(pass, pos)
     }
 
     private fun collectRadioTrackingState() {
@@ -261,6 +262,32 @@ class RadarViewModel(
                             isTracking = svc.isActive,
                             selectedTransponderUuid = svc.selectedTransponder?.uuid,
                             errorMessage = svc.errorMessage
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    private fun collectN76State() {
+        viewModelScope.launch {
+            trackingService.n76State.collect { n76 ->
+                _uiState.update {
+                    it.copy(n76 = n76.copy(autoRecord = settingsRepo.n76Settings.value.recordSatOnly))
+                }
+            }
+        }
+        viewModelScope.launch {
+            settingsRepo.n76Settings.collect { settings ->
+                _uiState.update { it.copy(n76 = it.n76.copy(autoRecord = settings.recordSatOnly)) }
+            }
+        }
+        viewModelScope.launch {
+            settingsRepo.radioControlSettings.collect { rc ->
+                _uiState.update {
+                    it.copy(
+                        n76 = it.n76.copy(
+                            isN76 = rc.radioModel == RadioControlSettings.MODEL_N76
                         )
                     )
                 }
@@ -303,7 +330,6 @@ class RadarViewModel(
                 val svc = trackingService.state.value
                 if (svc.isActive) {
                     trackingService.stopTracking()
-                    satlib.updateSatData(SatApiData())
                 } else {
                     val pass = _uiState.value.currentPass ?: return
                     val transponder = svc.selectedTransponder ?: return
@@ -312,6 +338,15 @@ class RadarViewModel(
             }
             RadarAction.ConnectRadios -> viewModelScope.launch { trackingService.connectRadios() }
             RadarAction.DisconnectRadios -> viewModelScope.launch { trackingService.disconnectRadios() }
+            is RadarAction.SetPtt -> trackingService.setPtt(action.on)
+            is RadarAction.SetN76Monitor -> trackingService.setN76Monitor(action.on)
+            RadarAction.N76RecordStart -> trackingService.startN76Recording()
+            RadarAction.N76RecordStop -> trackingService.stopN76Recording()
+            RadarAction.N76PlayLast -> trackingService.playLastN76Recording()
+            RadarAction.N76StopPlayback -> trackingService.stopN76Playback()
+            is RadarAction.SetN76AutoRecord -> {
+                settingsRepo.updateN76Settings(settingsRepo.n76Settings.value.copy(recordSatOnly = action.on))
+            }
 
             // SSTV actions
             is RadarAction.SstvPermissionResult -> {
@@ -415,36 +450,6 @@ class RadarViewModel(
                 reporter.reportFrequency(frequencyFormat, freq)
             }
         }
-    }
-
-    private fun pushSatApiData(pass: OrbitalPass, pos: OrbitalPos) {
-        val state = _uiState.value
-        val selectedTransponder = state.transceivers.transmitters
-            .firstOrNull { it.uuid == state.transceivers.selectedUuid }
-        val txFreq = selectedTransponder?.uplinkLow?.let { low ->
-            selectedTransponder.uplinkHigh?.let { high -> (low + high) / 2 } ?: low
-        }
-        satlib.updateSatData(
-            SatApiData(
-                satName = pass.name,
-                catNum = pass.catNum,
-                azimuthDeg = pos.azimuth.toDegrees().round(2),
-                elevationDeg = pos.elevation.toDegrees().round(2),
-                altitudeKm = pos.altitude.round(2),
-                distanceKm = pos.distance.round(2),
-                subSatLatDeg = pos.latitude.toDegrees().round(4),
-                subSatLonDeg = pos.longitude.toDegrees().round(4),
-                aboveHorizon = pos.aboveHorizon,
-                txFrequencyHz = txFreq,
-                rxFrequencyHz = state.transceivers.selectedFrequency,
-                ctcssTxToneHz = state.radioControl.ctcssTone,
-                ctcsRxToneHz = null,
-                mode = selectedTransponder?.downlinkMode,
-                aosTime = pass.aosTime,
-                losTime = pass.losTime,
-                timestamp = System.currentTimeMillis()
-            )
-        )
     }
 
     private suspend fun processRadios(radios: List<SatRadio>, orbitalObject: OrbitalObject, time: Long) {
@@ -580,7 +585,6 @@ class RadarViewModel(
                 RadarViewModel(
                     bluetoothReporter = container.provideBluetoothReporter(),
                     networkReporter = container.provideNetworkReporter(),
-                    satlib = container.satlib,
                     satelliteRepo = container.satelliteRepo,
                     settingsRepo = container.settingsRepo,
                     sensorsRepo = container.provideSensorsRepo(),

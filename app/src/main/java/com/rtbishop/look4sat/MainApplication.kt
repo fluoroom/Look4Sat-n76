@@ -18,7 +18,6 @@
 package com.rtbishop.look4sat
 
 import android.app.Application
-import com.rtbishop.look4sat.core.data.framework.Satlib
 import com.rtbishop.look4sat.core.data.injection.MainContainer
 import com.rtbishop.look4sat.core.domain.repository.IContainerProvider
 import com.rtbishop.look4sat.core.domain.repository.IMainContainer
@@ -36,7 +35,6 @@ class MainApplication : Application(), IContainerProvider {
     override fun onCreate() {
         super.onCreate()
         container = MainContainer(this)
-        container.satlib.start(Satlib.DEFAULT_PORT)
         // trigger automatic update every 48 hours
         container.appScope.launch { checkAutoUpdate() }
         // load satellite data on every app start

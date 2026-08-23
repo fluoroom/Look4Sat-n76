@@ -44,12 +44,8 @@ class SelectionRepo(
     // The HashSet gives O(1) catnum lookups instead of O(n) with a List.
     // Directly observe settingsRepo.selectedSatModes to ensure real-time sync across screens.
     private val itemsWithModes = settingsRepo.selectedSatModes.flatMapLatest { list: List<String> ->
-        val catnumSet: Set<Int>? = if (list.isEmpty()) {
-            null // null = no filtering
-        } else {
-            val ids = localSource.getIdsWithModes(list)
-            if (ids.isEmpty()) null else ids.toHashSet()
-        }
+        // Empty mode list = no filter. Non-empty with zero matches = empty result, not "show all".
+        val catnumSet: Set<Int>? = if (list.isEmpty()) null else localSource.getIdsWithModes(list).toHashSet()
         currentItems.map { items ->
             if (catnumSet == null) items else items.filter { it.catnum in catnumSet }
         }
@@ -67,7 +63,7 @@ class SelectionRepo(
 
     override fun getCurrentModes() = settingsRepo.selectedSatModes.value
 
-    override fun getModesList() = Sources.satelliteModes
+    override fun getModesList() = (Sources.satelliteModes + "APRS").distinct().sorted()
 
     override suspend fun getEntriesFlow() = withContext(dispatcher) {
         val selectedIds = settingsRepo.selectedIds.value.toHashSet()

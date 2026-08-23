@@ -21,5 +21,6 @@ enum class AudioSource(val label: String) {
     Mic("Microphone"),
     Unprocessed("Line-in / Unprocessed"),
     BluetoothSco("Bluetooth SCO"),
-    Internal("Internal audio")
+    Internal("Internal audio"),
+    N76Ht("N76 HT (direct)")
 }

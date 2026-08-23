@@ -30,6 +30,7 @@ interface ILocalSource {
     suspend fun deleteEntries()
     suspend fun getIdsWithModes(modes: List<String>): List<Int>
     suspend fun getIdsWithBands(bands: List<String>): List<Int>
+    suspend fun getIdsMatchingFilters(modes: List<String>, bands: List<String>): List<Int>
     suspend fun getAvailableModes(ids: List<Int>): List<String>
     suspend fun getRadiosTotal(): Int
     suspend fun getRadiosWithId(id: Int): List<SatRadio>
