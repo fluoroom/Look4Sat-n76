@@ -470,16 +470,22 @@ internal class DecoderEngine(
             when (detector.detectedWidth) {
                 SyncPulseWidth.FiveMs -> newLines = processPulse(modes5ms, offsets5ms, sync5ms, lines5ms, syncIdx)
                 SyncPulseWidth.NineMs -> {
-                    leaderBreak = syncIdx; newLines = processPulse(modes9ms, offsets9ms, sync9ms, lines9ms, syncIdx)
+                    newLines = processPulse(modes9ms, offsets9ms, sync9ms, lines9ms, syncIdx)
+                    // Image syncs are 9 ms (Scottie/Robot). Only treat a rejected pulse as a VIS break
+                    // so the last Scottie line does not steal the next Martin header.
+                    if (!newLines) leaderBreak = syncIdx
                 }
 
                 SyncPulseWidth.TwentyMs -> {
-                    leaderBreak = syncIdx; newLines = processPulse(modes20ms, offsets20ms, sync20ms, lines20ms, syncIdx)
+                    newLines = processPulse(modes20ms, offsets20ms, sync20ms, lines20ms, syncIdx)
+                    if (!newLines) leaderBreak = syncIdx
                 }
             }
         } else if (handleHeader()) {
             predictedStreak = 0
             newLines = true
+        } else if (leaderBreak >= visBitLen + leaderTol) {
+            // Waiting for the rest of a VIS header — do not invent lines from the 1900 Hz leader.
         } else if (sample > lastSync + (curLineSamples * 5) / 4) {
             newLines = decodePredictedLine()
         }
@@ -612,6 +618,19 @@ internal class DecoderEngine(
         }
     }
 
+    private fun resetPulseHistory() {
+        sync5ms.fill(0)
+        sync9ms.fill(0)
+        sync20ms.fill(0)
+        lines5ms.fill(0)
+        lines9ms.fill(0)
+        lines20ms.fill(0)
+        offsets5ms.fill(0f)
+        offsets9ms.fill(0f)
+        offsets20ms.fill(0f)
+        predictedStreak = 0
+    }
+
     private fun decodePredictedLine(): Boolean {
         // Avoid long streaks of synthetic lines; once we exceed the cap we wait for
         // real sync to reduce visible vertical compression on weak/noisy signals.
@@ -733,6 +752,7 @@ internal class DecoderEngine(
         mode.resetState()
         beginStrip(mode, separatorIfContinuing = true)
         currentMode = mode
+        resetPulseHistory()
         lastSync = sIdx + mode.firstSyncPulseIndex; curLineSamples = mode.scanLineSamples; lastOffset = ldrOffset
         var oldest = lastSync - (pulses.size - 1) * curLineSamples
         if (mode.firstSyncPulseIndex > 0) oldest -= curLineSamples
@@ -763,23 +783,34 @@ internal class DecoderEngine(
         if (lineSamples < scanLineMin || lineSamples > scratch.size) return false
         if (stdDev(lineLen, m) > lineTolerance) return false
         var changed = false
-        if (lockMode || imageBuffer.line >= 0) {
-            if (currentMode != rawMode && abs(lineSamples - currentMode.scanLineSamples) > lineTolerance) return false
+        val matchesCurrent = currentMode != rawMode &&
+            abs(lineSamples - currentMode.scanLineSamples) <= lineTolerance
+        if (lockMode) {
+            if (currentMode != rawMode && !matchesCurrent) return false
             if (imageBuffer.line < 0 && currentMode != rawMode) {
                 currentMode.resetState()
                 beginStrip(currentMode, separatorIfContinuing = false)
                 drawLines(0xff000000.toInt(), 10); drawLines(0xffffff00.toInt(), 8); drawLines(0xff000000.toInt(), 10)
             }
-        } else {
-            val detected = detectMode(modes, lineSamples)
-            if (detected == rawMode) return false
-            changed = detected != currentMode ||
-                abs(curLineSamples - lineSamples) > lineTolerance ||
-                abs(lastSync + lineSamples - syncPulses.last()) > syncTolerance
-            currentMode = detected
+        } else if (matchesCurrent) {
             if (imageBuffer.line < 0) {
                 currentMode.resetState()
                 beginStrip(currentMode, separatorIfContinuing = false)
+                drawLines(0xff000000.toInt(), 10); drawLines(0xffffff00.toInt(), 8); drawLines(0xff000000.toInt(), 10)
+            }
+        } else {
+            // Auto: a new pulse family (Martin 5 ms after Scottie 9 ms) must be allowed to
+            // retune. Staying locked to the previous mode paints the header as shredded lines.
+            val detected = detectMode(modes, lineSamples)
+            if (detected == rawMode) return false
+            val modeChanged = detected != currentMode
+            changed = modeChanged ||
+                abs(curLineSamples - lineSamples) > lineTolerance ||
+                abs(lastSync + lineSamples - syncPulses.last()) > syncTolerance
+            currentMode = detected
+            if (imageBuffer.line < 0 || modeChanged) {
+                currentMode.resetState()
+                beginStrip(currentMode, separatorIfContinuing = modeChanged)
                 drawLines(0xff000000.toInt(), 10); drawLines(0xff00ffff.toInt(), 8); drawLines(0xff000000.toInt(), 10)
             }
         }
