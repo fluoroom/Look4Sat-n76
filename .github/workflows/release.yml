@@ -40,11 +40,11 @@ jobs:
             --ks-pass pass:${{ secrets.KEY_STORE_PASSWORD }} \
             --ks-key-alias ${{ secrets.KEY_ALIAS }} \
             --key-pass pass:${{ secrets.KEY_PASSWORD }} \
-            --out app/build/outputs/apk/release/look4sat.apk \
+            --out app/build/outputs/apk/release/look4sat-n76.apk \
             "$APK"
           rm keystore.jks
 
       - name: Create Release
         run: |
           gh release create $TAG_NAME --title=$TAG_NAME --generate-notes
-          gh release upload $TAG_NAME app/build/outputs/apk/release/look4sat.apk
+          gh release upload $TAG_NAME app/build/outputs/apk/release/look4sat-n76.apk
