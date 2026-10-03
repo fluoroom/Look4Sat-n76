@@ -27,7 +27,10 @@ import com.rtbishop.look4sat.core.domain.model.AudioSource
 import com.rtbishop.look4sat.core.domain.model.DataSourcesSettings
 import com.rtbishop.look4sat.core.domain.model.DatabaseState
 import com.rtbishop.look4sat.core.domain.model.OtherSettings
+import com.rtbishop.look4sat.core.domain.model.FilterCategory
 import com.rtbishop.look4sat.core.domain.model.PassesSettings
+import com.rtbishop.look4sat.core.domain.model.decodeFilterCategories
+import com.rtbishop.look4sat.core.domain.model.encodeToString
 import com.rtbishop.look4sat.core.domain.model.RCSettings
 import com.rtbishop.look4sat.core.domain.model.N76Settings
 import com.rtbishop.look4sat.core.domain.model.RadioControlSettings
@@ -77,6 +80,7 @@ class SettingsRepo(
     private val keySelectedSatModes = "selectedSatModes"
     private val keyLegacySelectedModes = "selectedModes"
     private val keySelectedBands = "selectedBands"
+    private val keyFilterCategories = "filterCategories"
     private val keyAudioSource = "audioSource"
     private val keyStateOfAutoUpdate = "stateOfAutoUpdate"
     private val keyStateOfSensors = "stateOfSensors"
@@ -148,7 +152,7 @@ class SettingsRepo(
         putInt(keyFilterAosStartMinute, settings.aosStartMinute)
         putInt(keyFilterAosEndMinute, settings.aosEndMinute)
         putBoolean(keyFilterAosInvert, settings.invertAosTimeWindow)
-        putString(keySelectedBands, settings.selectedBands.joinToString(separatorComma))
+        putString(keyFilterCategories, settings.categories.encodeToString())
         _passesSettings.value = settings
     }
 
@@ -159,8 +163,8 @@ class SettingsRepo(
         val aosStartMinute = preferences.getInt(keyFilterAosStartMinute, 0).coerceIn(0, 23 * 60 + 59)
         val aosEndMinute = preferences.getInt(keyFilterAosEndMinute, 23 * 60 + 59).coerceIn(0, 23 * 60 + 59)
         val invertAosTimeWindow = preferences.getBoolean(keyFilterAosInvert, false)
-        val selectedBandsString = preferences.getString(keySelectedBands, null)
-        val selectedBands = selectedBandsString?.split(separatorComma)?.filter { it.isNotBlank() } ?: emptyList()
+        val categories = decodeFilterCategories(preferences.getString(keyFilterCategories, null))
+            ?: migrateLegacyFilter()
         return PassesSettings(
             showDeepSpace,
             hoursAhead,
@@ -168,8 +172,20 @@ class SettingsRepo(
             aosStartMinute,
             aosEndMinute,
             invertAosTimeWindow,
-            selectedBands
+            categories
         )
+    }
+
+    /**
+     * Folds the pre-category flat mode/band filter into a single include category. Only reached
+     * while [keyFilterCategories] is absent, so clearing every category stays cleared.
+     */
+    private fun migrateLegacyFilter(): List<FilterCategory> {
+        val bandsString = preferences.getString(keySelectedBands, null)
+        val bands = bandsString?.split(separatorComma)?.filter { it.isNotBlank() } ?: emptyList()
+        val modes = getSelectedSatModes()
+        if (modes.isEmpty() && bands.isEmpty()) return emptyList()
+        return listOf(FilterCategory(name = "Filter 1", modes = modes, bands = bands))
     }
     //endregion
 

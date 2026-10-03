@@ -127,12 +127,11 @@ private fun PassesScreen(
     }
     if (uiState.isTransponderDialogShown) {
         TransponderDialog(
-            modes = uiState.modes,
-            bands = uiState.bands,
+            categories = uiState.categories,
             availableModes = uiState.availableModes,
             cancel = { onAction(PassesAction.ToggleTransponderDialog) }
-        ) { modes, bands ->
-            onAction(PassesAction.FilterTransponders(modes, bands))
+        ) { categories ->
+            onAction(PassesAction.FilterTransponders(categories))
         }
     }
     if (uiState.shouldSeeWhatsNew) {

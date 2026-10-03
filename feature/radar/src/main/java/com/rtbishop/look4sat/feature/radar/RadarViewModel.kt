@@ -43,7 +43,8 @@ import com.rtbishop.look4sat.core.domain.usecase.IShowToast
 import com.rtbishop.look4sat.core.domain.utility.round
 import com.rtbishop.look4sat.core.domain.utility.toDegrees
 import com.rtbishop.look4sat.core.domain.utility.toTimerString
-import com.rtbishop.look4sat.core.domain.utility.matchesTransponderFilter
+import com.rtbishop.look4sat.core.domain.model.FilterCategory
+import com.rtbishop.look4sat.core.domain.utility.matchesFilterCategories
 import com.rtbishop.look4sat.core.presentation.formatFrequency
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -51,7 +52,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
@@ -172,12 +172,9 @@ class RadarViewModel(
     private fun collectPassAndStartTickLoop() {
         viewModelScope.launch {
             val pass = findCurrentPass() ?: return@launch
-            combine(
-                settingsRepo.selectedSatModes,
-                settingsRepo.passesSettings.map { it.selectedBands }.distinctUntilChanged()
-            ) { modes, bands -> modes to bands }
-                .collectLatest { (modes, bands) ->
-                    val allRadios = loadPassData(pass, modes, bands)
+            settingsRepo.passesSettings.map { it.categories }.distinctUntilChanged()
+                .collectLatest { categories ->
+                    val allRadios = loadPassData(pass, categories)
                     while (isActive) {
                         tickPass(pass, allRadios)
                         delay(1000.milliseconds)
@@ -194,10 +191,10 @@ class RadarViewModel(
     }
 
     // Loads transmitters and satellite track for pass, sets initial state, returns full radio list
-    private suspend fun loadPassData(pass: OrbitalPass, modes: List<String>, bands: List<String>): List<SatRadio> {
+    private suspend fun loadPassData(pass: OrbitalPass, categories: List<FilterCategory>): List<SatRadio> {
         _uiState.update { it.copy(currentPass = pass) }
         val allRadios = satelliteRepo.getRadiosWithId(pass.catNum)
-            .filter { it.matchesTransponderFilter(modes, bands) }
+            .filter { it.matchesFilterCategories(categories) }
         transponders = allRadios
         val previousUuid = _uiState.value.transceivers.selectedUuid
         val selectedUuid = previousUuid?.takeIf { uuid -> allRadios.any { it.uuid == uuid } }

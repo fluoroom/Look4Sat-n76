@@ -30,6 +30,7 @@ import com.rtbishop.look4sat.core.domain.predict.GeoPos
 import com.rtbishop.look4sat.core.domain.predict.OrbitalData
 import com.rtbishop.look4sat.core.domain.predict.OrbitalObject
 import com.rtbishop.look4sat.core.domain.repository.ISettingsRepo
+import com.rtbishop.look4sat.core.domain.model.FilterCategory
 import com.rtbishop.look4sat.core.domain.source.ILocalSource
 import com.rtbishop.look4sat.core.domain.source.IRemoteSource
 import com.rtbishop.look4sat.core.domain.source.NetworkResult
@@ -151,9 +152,8 @@ private class FakeLocalSource : ILocalSource {
 
     override suspend fun getIdsWithModes(modes: List<String>): List<Int> = emptyList()
 
-    override suspend fun getIdsWithBands(bands: List<String>): List<Int> = emptyList()
 
-    override suspend fun getIdsMatchingFilters(modes: List<String>, bands: List<String>): List<Int> = emptyList()
+    override suspend fun getIdsMatchingCategories(categories: List<FilterCategory>): List<Int> = emptyList()
 
     override suspend fun getAvailableModes(ids: List<Int>): List<String> = emptyList()
 

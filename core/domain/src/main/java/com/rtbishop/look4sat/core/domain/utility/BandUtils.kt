@@ -17,6 +17,7 @@
  */
 package com.rtbishop.look4sat.core.domain.utility
 
+import com.rtbishop.look4sat.core.domain.model.FilterCategory
 import com.rtbishop.look4sat.core.domain.model.SatRadio
 
 // Band letter assigned to a frequency in Hz.
@@ -69,3 +70,31 @@ fun matchesTransponderFilter(
 
 fun SatRadio.matchesTransponderFilter(modes: List<String>, bands: List<String>): Boolean =
     matchesTransponderFilter(downlinkMode, info, downlinkLow, uplinkLow, modes, bands)
+
+// Evaluates the category filter for a single radio: OR over the include categories, minus the
+// exclude ones. Empty categories are dropped first, so a half-filled one can't hide everything.
+// Deliberately per-radio, not per-satellite: the ISS has an FM voice downlink *and* telemetry
+// downlinks, so excluding telemetry must drop only that radio, never the whole satellite.
+fun matchesFilterCategories(
+    downlinkMode: String?,
+    info: String,
+    downlinkLow: Long?,
+    uplinkLow: Long?,
+    categories: List<FilterCategory>
+): Boolean {
+    if (downlinkLow == null) return false
+    fun matches(category: FilterCategory) = matchesTransponderFilter(
+        downlinkMode, info, downlinkLow, uplinkLow, category.modes, category.bands
+    )
+    val active = categories.filterNot { it.isEmpty }
+    if (active.isEmpty()) return true
+    val (excludes, includes) = active.partition { it.exclude }
+    if (includes.isNotEmpty() && includes.none { matches(it) }) return false
+    return excludes.none { matches(it) }
+}
+
+fun SatRadio.matchesFilterCategories(categories: List<FilterCategory>): Boolean =
+    matchesFilterCategories(downlinkMode, info, downlinkLow, uplinkLow, categories)
+
+// Union of every mode named by the filter, so the picker can still show a mode the DB doesn't list.
+fun List<FilterCategory>.referencedModes(): List<String> = flatMap { it.modes }.distinct()

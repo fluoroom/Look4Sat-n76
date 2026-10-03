@@ -17,6 +17,7 @@
  */
 package com.rtbishop.look4sat.feature.passes
 
+import com.rtbishop.look4sat.core.domain.model.FilterCategory
 import com.rtbishop.look4sat.core.domain.predict.OrbitalPass
 
 data class PassesState(
@@ -35,8 +36,7 @@ data class PassesState(
     val aosEndMinute: Int = 23 * 60 + 59,
     val invertAosTimeWindow: Boolean = false,
     val showDeepSpace: Boolean = true,
-    val modes: List<String> = emptyList(),
-    val bands: List<String> = emptyList(),
+    val categories: List<FilterCategory> = emptyList(),
     val availableModes: List<String> = emptyList(),
     val itemsList: List<OrbitalPass> = emptyList(),
     val groupedPasses: Map<String, List<OrbitalPass>> = emptyMap(),
@@ -57,7 +57,7 @@ sealed interface PassesAction {
         val invertAosTimeWindow: Boolean,
         val showDeepSpace: Boolean
     ) : PassesAction
-    data class FilterTransponders(val modes: List<String>, val bands: List<String>) : PassesAction
+    data class FilterTransponders(val categories: List<FilterCategory>) : PassesAction
     data object RefreshPasses : PassesAction
     data object TogglePassesDialog : PassesAction
     data object ToggleTransponderDialog : PassesAction

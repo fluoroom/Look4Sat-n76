@@ -43,6 +43,18 @@
     <string name="pass_time_placeholder" translatable="false"> -- : -- : -- </string>
     <string name="pass_modes_title">Select modes</string>
     <string name="pass_transponder_title">Filter transceivers</string>
+    <string name="pass_transponder_categories">Filter categories</string>
+    <string name="pass_transponder_add">Add category</string>
+    <string name="pass_transponder_edit">Edit category</string>
+    <string name="pass_transponder_name">Category name</string>
+    <string name="pass_transponder_exclude">Exclude matches</string>
+    <string name="pass_transponder_modes">Modulation mode</string>
+    <string name="pass_transponder_bands">Band configuration</string>
+    <string name="pass_transponder_any">any</string>
+    <string name="pass_transponder_hint">
+        Each category matches a mode set AND a band set on the same transceiver.
+        A transceiver passes when it matches any included category and no excluded one.
+        \n\nNo categories means no filtering.</string>
     <string name="pass_satId" translatable="false">%05d</string>
     <string name="pass_elevation">Elevation: %.1f°</string>
     <string name="pass_deep_space" translatable="false">DeepSpace</string>

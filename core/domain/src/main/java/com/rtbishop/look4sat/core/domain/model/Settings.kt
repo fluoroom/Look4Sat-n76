@@ -17,6 +17,9 @@
  */
 package com.rtbishop.look4sat.core.domain.model
 
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+
 data class DatabaseState(
     val numberOfRadios: Int,
     val numberOfSatellites: Int,
@@ -30,8 +33,41 @@ data class PassesSettings(
     val aosStartMinute: Int = 0,
     val aosEndMinute: Int = 23 * 60 + 59,
     val invertAosTimeWindow: Boolean = false,
-    val selectedBands: List<String> = emptyList()
+    val categories: List<FilterCategory> = emptyList()
 )
+
+/**
+ * One clause of the transceiver filter: a mode set AND a band set that must both match on the
+ * same radio. Categories combine as OR-of-ANDs, with [exclude] ones subtracted from the result:
+ * a radio passes when it matches at least one include category and no exclude category.
+ *
+ * This lets a single filter hold "FM on V only" (SSTV) alongside "FM on V/U" (repeaters) without
+ * the mode x band cross product also admitting the pairings you never asked for.
+ */
+@Serializable
+data class FilterCategory(
+    val name: String = "",
+    val modes: List<String> = emptyList(),
+    val bands: List<String> = emptyList(),
+    val exclude: Boolean = false
+) {
+    /** A category that constrains nothing is ignored, so an unfinished one can never hide everything. */
+    val isEmpty: Boolean get() = modes.isEmpty() && bands.isEmpty()
+}
+
+private val filterCategoryJson = Json { ignoreUnknownKeys = true }
+
+fun List<FilterCategory>.encodeToString(): String = filterCategoryJson.encodeToString(this)
+
+/** Returns null when [value] is absent or unparsable, so callers can fall back to a migration. */
+fun decodeFilterCategories(value: String?): List<FilterCategory>? {
+    if (value.isNullOrBlank()) return null
+    return try {
+        filterCategoryJson.decodeFromString<List<FilterCategory>>(value)
+    } catch (_: Exception) {
+        null
+    }
+}
 
 data class RCSettings(
     val rotatorState: Boolean,

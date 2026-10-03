@@ -17,6 +17,7 @@
  */
 package com.rtbishop.look4sat.core.data.repository
 
+import com.rtbishop.look4sat.core.domain.model.FilterCategory
 import com.rtbishop.look4sat.core.domain.model.SatRadio
 import com.rtbishop.look4sat.core.domain.predict.GeoPos
 import com.rtbishop.look4sat.core.domain.predict.OrbitalObject
@@ -25,6 +26,7 @@ import com.rtbishop.look4sat.core.domain.predict.OrbitalPos
 import com.rtbishop.look4sat.core.domain.repository.ISatelliteRepo
 import com.rtbishop.look4sat.core.domain.repository.ISettingsRepo
 import com.rtbishop.look4sat.core.domain.source.ILocalSource
+import com.rtbishop.look4sat.core.domain.utility.referencedModes
 import com.rtbishop.look4sat.core.domain.utility.round
 import com.rtbishop.look4sat.core.domain.utility.toDegrees
 import kotlinx.coroutines.CoroutineDispatcher
@@ -74,14 +76,13 @@ class SatelliteRepo(
         combine(
             settingsRepo.selectedIds,
             settingsRepo.stationPosition,
-            settingsRepo.selectedSatModes,
             settingsRepo.passesSettings,
             settingsRepo.otherSettings.map { it.stateOfUtc }.distinctUntilChanged()
-        ) { selectedIds, _, modes, settings, _ ->
-            Triple(selectedIds, modes, settings)
+        ) { selectedIds, _, settings, _ ->
+            selectedIds to settings
         }
             .debounce(50.milliseconds)
-            .collect { (selectedIds, modes, settings) ->
+            .collect { (selectedIds, settings) ->
                 _satellites.update { localStorage.getEntriesWithIds(selectedIds) }
                 calculatePasses(
                     time = System.currentTimeMillis(),
@@ -90,12 +91,12 @@ class SatelliteRepo(
                     aosStartMinute = settings.aosStartMinute,
                     aosEndMinute = settings.aosEndMinute,
                     invertAosTimeWindow = settings.invertAosTimeWindow,
-                    modes = modes,
-                    bands = settings.selectedBands
+                    categories = settings.categories
                 )
                 try {
                     val listed = localStorage.getAvailableModes(selectedIds)
-                    _availableModes.update { (listed + modes).distinct().sorted() }
+                    val referenced = settings.categories.referencedModes()
+                    _availableModes.update { (listed + referenced).distinct().sorted() }
                 } catch (_: Exception) {}
             }
     }
@@ -143,8 +144,7 @@ class SatelliteRepo(
         aosStartMinute: Int,
         aosEndMinute: Int,
         invertAosTimeWindow: Boolean,
-        modes: List<String>,
-        bands: List<String>
+        categories: List<FilterCategory>
     ) {
         _isCalculating.value = true
         // Normalize to the start of the current minute so that coarse 60-second stepping
@@ -153,10 +153,12 @@ class SatelliteRepo(
         val currentSatellites = _satellites.value
         withContext(dispatcher) {
             val stationPos = settingsRepo.stationPosition.value
-            val filteredSatellites = if (modes.isEmpty() && bands.isEmpty()) {
+            // Emptiness of the *filter* decides, not emptiness of its result: an active filter
+            // that matches nothing must yield no passes rather than falling back to every pass.
+            val filteredSatellites = if (categories.all { it.isEmpty }) {
                 currentSatellites
             } else {
-                val matchingIds = localStorage.getIdsMatchingFilters(modes, bands).toHashSet()
+                val matchingIds = localStorage.getIdsMatchingCategories(categories).toHashSet()
                 currentSatellites.filter { it.data.catnum in matchingIds }
             }
             // Compute passes for each satellite in parallel

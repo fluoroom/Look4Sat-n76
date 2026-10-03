@@ -17,6 +17,7 @@
  */
 package com.rtbishop.look4sat.core.domain.repository
 
+import com.rtbishop.look4sat.core.domain.model.FilterCategory
 import com.rtbishop.look4sat.core.domain.model.SatRadio
 import com.rtbishop.look4sat.core.domain.predict.GeoPos
 import com.rtbishop.look4sat.core.domain.predict.OrbitalObject
@@ -54,8 +55,7 @@ interface ISatelliteRepo {
         aosStartMinute: Int,
         aosEndMinute: Int,
         invertAosTimeWindow: Boolean,
-        modes: List<String>,
-        bands: List<String> = emptyList()
+        categories: List<FilterCategory>
     )
 
     /** Get the current position of a single satellite. */

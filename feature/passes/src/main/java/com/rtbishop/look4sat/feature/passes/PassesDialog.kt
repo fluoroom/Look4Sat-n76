@@ -35,6 +35,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
@@ -56,6 +57,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.rtbishop.look4sat.core.domain.model.FilterCategory
 import com.rtbishop.look4sat.core.domain.utility.allBandConfigs
 import com.rtbishop.look4sat.core.presentation.LocalSpacing
 import com.rtbishop.look4sat.core.presentation.MainTheme
@@ -356,64 +358,232 @@ private fun ElevationColorsRangeSliderRow(
 @Preview(showBackground = true)
 @Composable
 private fun TransponderDialogPreview() {
-    MainTheme { TransponderDialog(emptyList(), emptyList(), emptyList(), {}) { _, _ -> } }
+    MainTheme {
+        TransponderDialog(
+            categories = listOf(
+                FilterCategory("SSTV", listOf("FM", "SSTV"), listOf("V")),
+                FilterCategory("FM repeaters", listOf("FM", "FMN"), listOf("V/U")),
+                FilterCategory("Telemetry", listOf("BPSK", "GMSK"), emptyList(), exclude = true)
+            ),
+            availableModes = listOf("BPSK", "FM", "FMN", "GMSK", "SSTV"),
+            cancel = {}
+        ) {}
+    }
+}
+
+/**
+ * Two-level editor: the category list, and the mode/band picker for one category. Everything is
+ * held as a draft until Accept on the list level, so a cancelled edit leaves the saved filter alone.
+ */
+@Composable
+internal fun TransponderDialog(
+    categories: List<FilterCategory>,
+    availableModes: List<String>,
+    cancel: () -> Unit,
+    accept: (List<FilterCategory>) -> Unit
+) {
+    val draft = remember { mutableStateOf(categories) }
+    // Index into draft, or draft.size for a freshly added one. null shows the category list.
+    val editIndex = remember { mutableStateOf<Int?>(null) }
+    val editBuffer = remember { mutableStateOf(FilterCategory()) }
+    val commitEdit = {
+        editIndex.value?.let { index ->
+            draft.value = draft.value.toMutableList().also {
+                if (index < it.size) it[index] = editBuffer.value else it.add(editBuffer.value)
+            }
+        }
+        editIndex.value = null
+    }
+    val isEditing = editIndex.value != null
+    val onCancel: () -> Unit = if (isEditing) { { editIndex.value = null } } else cancel
+    // Dropping the empty categories keeps an abandoned "Filter 3" from reaching the filter.
+    val onAccept: () -> Unit =
+        if (isEditing) commitEdit else { { accept(draft.value.filterNot { it.isEmpty }).also { cancel() } } }
+    val title = stringResource(
+        if (isEditing) R.string.pass_transponder_edit else R.string.pass_transponder_title
+    )
+    ConfirmDialog(title = title, onCancel = onCancel, onAccept = onAccept) {
+        if (isEditing) {
+            CategoryEditor(
+                category = editBuffer.value,
+                availableModes = availableModes,
+                onChange = { editBuffer.value = it }
+            )
+        } else {
+            CategoryList(
+                categories = draft.value,
+                onEdit = { index ->
+                    editBuffer.value = draft.value[index]
+                    editIndex.value = index
+                },
+                onDelete = { index -> draft.value = draft.value.filterIndexed { i, _ -> i != index } },
+                onAdd = {
+                    editBuffer.value = FilterCategory(name = "Filter ${draft.value.size + 1}")
+                    editIndex.value = draft.value.size
+                }
+            )
+        }
+    }
 }
 
 @Composable
-internal fun TransponderDialog(
-    modes: List<String>,
-    bands: List<String>,
-    availableModes: List<String>,
-    cancel: () -> Unit,
-    accept: (List<String>, List<String>) -> Unit
+private fun CategoryList(
+    categories: List<FilterCategory>,
+    onEdit: (Int) -> Unit,
+    onDelete: (Int) -> Unit,
+    onAdd: () -> Unit
 ) {
-    val selectedModes = remember { mutableStateOf(modes.toSet()) }
-    val selectedBands = remember { mutableStateOf(bands.toSet()) }
-    val toggleMode = { mode: String ->
-        selectedModes.value = if (mode in selectedModes.value) selectedModes.value - mode else selectedModes.value + mode
-    }
-    val toggleBand = { band: String ->
-        selectedBands.value = if (band in selectedBands.value) selectedBands.value - band else selectedBands.value + band
-    }
-    val onAccept = { accept(selectedModes.value.toList(), selectedBands.value.toList()).also { cancel() } }
-    ConfirmDialog(title = stringResource(R.string.pass_transponder_title), onCancel = cancel, onAccept = onAccept) {
-        SectionHeader("Modulation mode")
-        LazyVerticalGrid(
-            columns = GridCells.Adaptive(240.dp),
-            modifier = Modifier
-                .fillMaxHeight(0.38f)
-                .background(MaterialTheme.colorScheme.background),
-            horizontalArrangement = Arrangement.spacedBy(1.dp),
-            verticalArrangement = Arrangement.spacedBy(1.dp)
-        ) {
-            itemsIndexed((availableModes + modes.filter { it !in availableModes })) { index, item ->
-                FilterRow(
-                    label = "${index + 1}).",
-                    text = item,
-                    checked = item in selectedModes.value,
-                    onClick = { toggleMode(item) }
+    SectionHeader(stringResource(R.string.pass_transponder_categories))
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(1),
+        modifier = Modifier
+            .fillMaxHeight(0.5f)
+            .background(MaterialTheme.colorScheme.background),
+        verticalArrangement = Arrangement.spacedBy(1.dp)
+    ) {
+        itemsIndexed(categories) { index, category ->
+            CategoryRow(category = category, onClick = { onEdit(index) }, onDelete = { onDelete(index) })
+        }
+        item {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surface)
+                    .clickable { onAdd() }
+                    .padding(vertical = 12.dp)
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_add),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 16.dp).size(20.dp)
+                )
+                Text(
+                    text = stringResource(R.string.pass_transponder_add),
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.primary
                 )
             }
         }
-        HorizontalDivider(thickness = 2.dp, color = MaterialTheme.colorScheme.background)
-        // Bands section
-        SectionHeader("Band configuration")
-        LazyVerticalGrid(
-            columns = GridCells.Adaptive(120.dp),
+    }
+    Text(
+        text = stringResource(R.string.pass_transponder_hint),
+        fontSize = 12.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = LocalSpacing.current.large)
+    )
+    Spacer(modifier = Modifier.height(0.dp))
+}
+
+@Composable
+private fun CategoryRow(category: FilterCategory, onClick: () -> Unit, onDelete: () -> Unit) {
+    val anyLabel = stringResource(R.string.pass_transponder_any)
+    val unnamed = stringResource(R.string.pass_transponder_edit)
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface)
+            .clickable { onClick() }
+    ) {
+        Text(
+            text = if (category.exclude) "\u2212" else "+",
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold,
+            color = if (category.exclude) ElevationLowColor else ElevationHighColor,
+            modifier = Modifier.padding(start = 16.dp, end = 12.dp)
+        )
+        Column(
             modifier = Modifier
-                .fillMaxHeight(0.62f)
-                .background(MaterialTheme.colorScheme.background),
-            horizontalArrangement = Arrangement.spacedBy(1.dp),
-            verticalArrangement = Arrangement.spacedBy(1.dp)
+                .weight(1f)
+                .padding(vertical = 8.dp)
         ) {
-            itemsIndexed(allBandConfigs) { index, item ->
-                FilterRow(
-                    label = "${index + 1}).",
-                    text = item,
-                    checked = item in selectedBands.value,
-                    onClick = { toggleBand(item) }
-                )
-            }
+            Text(
+                text = category.name.ifBlank { unnamed },
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = "${summarize(category.modes, anyLabel)} \u2022 ${summarize(category.bands, anyLabel)}",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Icon(
+            painter = painterResource(R.drawable.ic_delete),
+            contentDescription = null,
+            modifier = Modifier
+                .clickable { onDelete() }
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .size(20.dp)
+        )
+    }
+}
+
+private fun summarize(values: List<String>, anyLabel: String) =
+    if (values.isEmpty()) anyLabel else values.joinToString(", ")
+
+private fun List<String>.toggled(value: String) = if (value in this) this - value else this + value
+
+@Composable
+private fun CategoryEditor(
+    category: FilterCategory,
+    availableModes: List<String>,
+    onChange: (FilterCategory) -> Unit
+) {
+    OutlinedTextField(
+        value = category.name,
+        onValueChange = { onChange(category.copy(name = it)) },
+        label = { Text(text = stringResource(R.string.pass_transponder_name)) },
+        singleLine = true,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = LocalSpacing.current.large)
+    )
+    ToggleRow(
+        title = stringResource(R.string.pass_transponder_exclude),
+        checked = category.exclude,
+        onCheckedChange = { onChange(category.copy(exclude = it)) }
+    )
+    SectionHeader(stringResource(R.string.pass_transponder_modes))
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(240.dp),
+        modifier = Modifier
+            .fillMaxHeight(0.42f)
+            .background(MaterialTheme.colorScheme.background),
+        horizontalArrangement = Arrangement.spacedBy(1.dp),
+        verticalArrangement = Arrangement.spacedBy(1.dp)
+    ) {
+        itemsIndexed(availableModes + category.modes.filter { it !in availableModes }) { index, item ->
+            FilterRow(
+                label = "${index + 1}).",
+                text = item,
+                checked = item in category.modes,
+                onClick = { onChange(category.copy(modes = category.modes.toggled(item))) }
+            )
+        }
+    }
+    HorizontalDivider(thickness = 2.dp, color = MaterialTheme.colorScheme.background)
+    SectionHeader(stringResource(R.string.pass_transponder_bands))
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(120.dp),
+        modifier = Modifier
+            .fillMaxHeight(0.62f)
+            .background(MaterialTheme.colorScheme.background),
+        horizontalArrangement = Arrangement.spacedBy(1.dp),
+        verticalArrangement = Arrangement.spacedBy(1.dp)
+    ) {
+        itemsIndexed(allBandConfigs) { index, item ->
+            FilterRow(
+                label = "${index + 1}).",
+                text = item,
+                checked = item in category.bands,
+                onClick = { onChange(category.copy(bands = category.bands.toggled(item))) }
+            )
         }
     }
 }

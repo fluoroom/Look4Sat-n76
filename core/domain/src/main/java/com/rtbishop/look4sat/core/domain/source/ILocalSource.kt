@@ -17,6 +17,7 @@
  */
 package com.rtbishop.look4sat.core.domain.source
 
+import com.rtbishop.look4sat.core.domain.model.FilterCategory
 import com.rtbishop.look4sat.core.domain.model.SatItem
 import com.rtbishop.look4sat.core.domain.model.SatRadio
 import com.rtbishop.look4sat.core.domain.predict.OrbitalData
@@ -29,8 +30,9 @@ interface ILocalSource {
     suspend fun insertEntries(entries: List<OrbitalData>)
     suspend fun deleteEntries()
     suspend fun getIdsWithModes(modes: List<String>): List<Int>
-    suspend fun getIdsWithBands(bands: List<String>): List<Int>
-    suspend fun getIdsMatchingFilters(modes: List<String>, bands: List<String>): List<Int>
+
+    /** Ids of satellites owning at least one radio that passes the whole category filter. */
+    suspend fun getIdsMatchingCategories(categories: List<FilterCategory>): List<Int>
     suspend fun getAvailableModes(ids: List<Int>): List<String>
     suspend fun getRadiosTotal(): Int
     suspend fun getRadiosWithId(id: Int): List<SatRadio>

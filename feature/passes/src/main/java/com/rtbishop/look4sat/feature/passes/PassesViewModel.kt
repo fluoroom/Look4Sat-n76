@@ -21,7 +21,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import com.rtbishop.look4sat.core.domain.model.PassesSettings
+import com.rtbishop.look4sat.core.domain.model.FilterCategory
 import com.rtbishop.look4sat.core.domain.predict.CelestialComputer
 import com.rtbishop.look4sat.core.domain.predict.OrbitalPass
 import com.rtbishop.look4sat.core.domain.repository.IMainContainer
@@ -64,8 +64,7 @@ class PassesViewModel(
             aosEndMinute = settingsRepo.passesSettings.value.aosEndMinute,
             invertAosTimeWindow = settingsRepo.passesSettings.value.invertAosTimeWindow,
             showDeepSpace = settingsRepo.passesSettings.value.showDeepSpace,
-            modes = settingsRepo.selectedSatModes.value,
-            bands = settingsRepo.passesSettings.value.selectedBands,
+            categories = settingsRepo.passesSettings.value.categories,
             shouldSeeWhatsNew = settingsRepo.otherSettings.value.shouldSeeWhatsNew
         )
     )
@@ -98,9 +97,8 @@ class PassesViewModel(
             }
         }
         viewModelScope.launch {
-            settingsRepo.selectedSatModes.collectLatest { modes ->
-                _uiState.update { it.copy(modes = modes) }
-            }
+            settingsRepo.passesSettings.map { it.categories }.distinctUntilChanged()
+                .collectLatest { categories -> _uiState.update { it.copy(categories = categories) } }
         }
         // Tick loop: restarts on passes change, UTC/DeepSpace changes. Grouping/sun-time
         // computations run once per restart, progress/countdown are calculated every second.
@@ -150,7 +148,7 @@ class PassesViewModel(
                     invertAosTimeWindow = action.invertAosTimeWindow,
                     showDeepSpace = action.showDeepSpace
                 )
-            is PassesAction.FilterTransponders -> setTransponderFilter(action.modes, action.bands)
+            is PassesAction.FilterTransponders -> setTransponderFilter(action.categories)
             PassesAction.RefreshPasses -> refreshPasses()
             PassesAction.TogglePassesDialog ->
                 _uiState.update { it.copy(isPassesDialogShown = !it.isPassesDialogShown) }
@@ -263,14 +261,13 @@ class PassesViewModel(
         showDeepSpace: Boolean
     ) = viewModelScope.launch {
         settingsRepo.setPassesSettings(
-            PassesSettings(
-                showDeepSpace,
-                hoursAhead,
-                minElevation,
-                aosStartMinute,
-                aosEndMinute,
-                invertAosTimeWindow,
-                _uiState.value.bands
+            settingsRepo.passesSettings.value.copy(
+                showDeepSpace = showDeepSpace,
+                hoursAhead = hoursAhead,
+                minElevation = minElevation,
+                aosStartMinute = aosStartMinute,
+                aosEndMinute = aosEndMinute,
+                invertAosTimeWindow = invertAosTimeWindow
             )
         )
         settingsRepo.updateOtherSettings { it.copy(lowElevation = lowElevation, highElevation = highElevation) }
@@ -288,18 +285,14 @@ class PassesViewModel(
         }
     }
 
-    private fun setTransponderFilter(modes: List<String>, bands: List<String>) = viewModelScope.launch {
-        settingsRepo.setSelectedSatModes(modes)
+    private fun setTransponderFilter(categories: List<FilterCategory>) = viewModelScope.launch {
         settingsRepo.setPassesSettings(
-            settingsRepo.passesSettings.value.copy(selectedBands = bands)
+            settingsRepo.passesSettings.value.copy(categories = categories)
         )
-        _uiState.update { it.copy(modes = modes, bands = bands) }
+        _uiState.update { it.copy(categories = categories) }
     }
 
-    private suspend fun recalculatePasses(
-        modes: List<String> = settingsRepo.selectedSatModes.value,
-        bands: List<String> = settingsRepo.passesSettings.value.selectedBands
-    ) {
+    private fun refreshPasses() = viewModelScope.launch {
         val settings = settingsRepo.passesSettings.value
         satelliteRepo.calculatePasses(
             time = System.currentTimeMillis(),
@@ -308,13 +301,8 @@ class PassesViewModel(
             aosStartMinute = settings.aosStartMinute,
             aosEndMinute = settings.aosEndMinute,
             invertAosTimeWindow = settings.invertAosTimeWindow,
-            modes = modes,
-            bands = bands
+            categories = settings.categories
         )
-    }
-
-    private fun refreshPasses() = viewModelScope.launch {
-        recalculatePasses()
     }
 
     companion object {
