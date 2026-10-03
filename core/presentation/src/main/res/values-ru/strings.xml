@@ -120,6 +120,8 @@
     <string name="prefs_data_sources_restore">Восстановить источники по умолчанию</string>
     <string name="prefs_data_sources_sat_title">Данные спутников</string>
     <string name="prefs_data_sources_transceivers_title">Данные трансиверов</string>
+    <string name="prefs_data_sources_sat_hint">Приоритет сверху: названия спутников</string>
+    <string name="prefs_data_sources_transceivers_hint">Приоритет сверху: данные трансиверов</string>
     <string name="prefs_data_sources_tle_switch">URL TLE</string>
     <string name="prefs_data_sources_transceivers_switch">URL трансиверов</string>
     <string name="prefs_data_sources_url_title" translatable="false">URL (HTTPS)</string>
@@ -159,10 +161,13 @@
 
     <string name="prefs_other_title">Прочее</string>
     <string name="prefs_other_switch_utc">Время в UTC</string>
-    <string name="prefs_other_switch_update">Автообновление данных</string>
+    <string name="prefs_other_switch_update">Автообновление</string>
     <string name="prefs_other_switch_sweep">Анимация радара</string>
     <string name="prefs_other_switch_sensors">Сенсоры</string>
     <string name="prefs_other_switch_night_mode">Ночной фильтр</string>
+    <string name="prefs_other_switch_light_theme">Светлая тема</string>
+    <string name="prefs_other_compass_offset_az">Смещение компаса (азимут)</string>
+    <string name="prefs_other_compass_offset_elev">Смещение компаса (элевация)</string>
 
     <string name="prefs_highlight_title">Подсветка высоты</string>
     <string name="prefs_highlight_low">Низко &lt; %1$d°</string>

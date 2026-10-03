@@ -152,6 +152,8 @@
     <string name="prefs_data_sources_restore">Varsayılan kaynakları geri yükle</string>
     <string name="prefs_data_sources_sat_title">Uydu verileri</string>
     <string name="prefs_data_sources_transceivers_title">Transceiver verileri</string>
+    <string name="prefs_data_sources_sat_hint">Öncelik üstte: uydu adları</string>
+    <string name="prefs_data_sources_transceivers_hint">Öncelik üstte: transceiver verileri</string>
     <string name="prefs_data_sources_tle_switch">TLE URL</string>
     <string name="prefs_data_sources_transceivers_switch">Transceiver URL</string>
     <string name="prefs_data_sources_url_title" translatable="false">URL (HTTPS)</string>
@@ -191,10 +193,13 @@
 
     <string name="prefs_other_title">Diğer</string>
     <string name="prefs_other_switch_utc">UTC saati</string>
-    <string name="prefs_other_switch_update">Veriyi otomatik güncelle</string>
+    <string name="prefs_other_switch_update">Otomatik güncelle</string>
     <string name="prefs_other_switch_sweep">Radar taraması</string>
     <string name="prefs_other_switch_sensors">Sensör</string>
     <string name="prefs_other_switch_night_mode">Gece filtresi</string>
+    <string name="prefs_other_switch_light_theme">Açık tema</string>
+    <string name="prefs_other_compass_offset_az">Pusula sapması (azimut)</string>
+    <string name="prefs_other_compass_offset_elev">Pusula sapması (yükseklik açısı)</string>
 
     <string name="prefs_highlight_title">Elevasyon vurgusu</string>
     <string name="prefs_highlight_low">Düşük &lt; %1$d°</string>

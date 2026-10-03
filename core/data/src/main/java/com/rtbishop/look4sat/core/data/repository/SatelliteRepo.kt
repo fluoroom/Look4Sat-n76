@@ -197,6 +197,7 @@ class SatelliteRepo(
         aosEndMinute: Int,
         invertAosTimeWindow: Boolean
     ): Boolean {
+        // Must match the timezone used to display pass times (UTC toggle vs device local)
         val tz = if (settingsRepo.otherSettings.value.stateOfUtc) {
             TimeZone.getTimeZone("UTC")
         } else {

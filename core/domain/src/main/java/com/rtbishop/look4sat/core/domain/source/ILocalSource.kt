@@ -27,6 +27,10 @@ interface ILocalSource {
     suspend fun getEntriesTotal(): Int
     suspend fun getEntriesList(): List<SatItem>
     suspend fun getEntriesWithIds(ids: List<Int>): List<OrbitalObject>
+    suspend fun getEntriesEpochs(): Map<Int, Double>
+    suspend fun getEntriesNames(): Map<Int, String>
+    suspend fun renameEntries(names: Map<Int, String>)
+    suspend fun deleteEntriesWithIds(ids: List<Int>)
     suspend fun insertEntries(entries: List<OrbitalData>)
     suspend fun deleteEntries()
     suspend fun getIdsWithModes(modes: List<String>): List<Int>
@@ -36,6 +40,9 @@ interface ILocalSource {
     suspend fun getAvailableModes(ids: List<Int>): List<String>
     suspend fun getRadiosTotal(): Int
     suspend fun getRadiosWithId(id: Int): List<SatRadio>
-    suspend fun insertRadios(radios: List<SatRadio>)
+    suspend fun insertRadios(radios: List<SatRadio>, isCustom: Boolean)
     suspend fun deleteRadios()
+
+    /** Drops the transceivers provided by the remote sources, keeping the imported ones. */
+    suspend fun deleteManagedRadios()
 }

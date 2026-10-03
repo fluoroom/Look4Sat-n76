@@ -30,6 +30,7 @@ import kotlinx.coroutines.flow.StateFlow
 interface ISettingsRepo {
 
     val appVersionName: String
+    val appVersionCode: Long
 
     //region # Satellites selection settings
     val selectedIds: StateFlow<List<Int>>
@@ -87,5 +88,10 @@ interface ISettingsRepo {
     //region # Per-satellite calculator offset settings
     fun getSatelliteOffset(catnum: Int): String
     fun setSatelliteOffset(catnum: Int, offset: String)
+    //endregion
+
+    //region # AMSAT status report settings
+    fun getAmSatCallsign(): String
+    fun setAmSatCallsign(callsign: String)
     //endregion
 }

@@ -21,6 +21,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
+import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Overlay
 import kotlin.math.cos
@@ -39,9 +40,11 @@ import kotlin.math.sin
  * exceeds 90°, i.e. the dot product of the two unit vectors is negative:
  *   dot = sin(lat)*sin(sunLat) + cos(lat)*cos(sunLat)*cos(lon - sunLon) < 0
  *
- * Performance: we sample one column per [stepPx] pixels (default 4) and draw
+ * Performance: we sample one column per stepPx pixels (default 4) and draw
  * filled vertical rectangles.  On a 1080-wide screen this means ~270 trig
- * evaluations per row, which is imperceptible.
+ * evaluations per row, which is imperceptible.  draw() is called on every
+ * frame, so it must stay allocation-free — all fromPixels() calls reuse a
+ * single GeoPoint instance.
  */
 class MapNightOverlay : Overlay() {
 
@@ -58,6 +61,9 @@ class MapNightOverlay : Overlay() {
 
     private val rect = RectF()
 
+    /** Reused across every fromPixels() call — draw() runs on every frame, so it must not allocate */
+    private val reusableGeoPoint = GeoPoint(0.0, 0.0)
+
     override fun draw(canvas: Canvas, mapView: MapView, shadow: Boolean) {
         if (shadow) return
 
@@ -71,6 +77,15 @@ class MapNightOverlay : Overlay() {
         val h = mapView.height
         val stepPx = 4 // sample every N pixels — balance quality vs CPU
 
+        // The map is never rotated, so latitude depends only on y and longitude only on x.
+        // Resolve the top/bottom latitudes once instead of once per column.
+        val latTopRad = Math.toRadians((proj.fromPixels(0, 0, reusableGeoPoint) ?: return).latitude)
+        val latBotRad = Math.toRadians((proj.fromPixels(0, h - 1, reusableGeoPoint) ?: return).latitude)
+        val sinLatTop = sin(latTopRad)
+        val cosLatTop = cos(latTopRad)
+        val sinLatBot = sin(latBotRad)
+        val cosLatBot = cos(latBotRad)
+
         // We scan column by column. For each column we determine the longitude,
         // then find the latitude range that is in night and shade it.
         // Since longitude is constant along a vertical strip and the day/night
@@ -79,22 +94,14 @@ class MapNightOverlay : Overlay() {
 
         var x = 0
         while (x < w) {
-            // Get the geographic coordinate at the top and bottom of this column.
-            val geoTop = proj.fromPixels(x, 0) ?: run { x += stepPx; continue }
-            val geoBot = proj.fromPixels(x, h - 1) ?: run { x += stepPx; continue }
-
+            val geoTop = proj.fromPixels(x, 0, reusableGeoPoint) ?: run { x += stepPx; continue }
             val lonRad = Math.toRadians(geoTop.longitude)
             val cosLonDiff = cos(lonRad - sunLonRad)
 
-            // Top pixel geographic lat
-            val latTopRad = Math.toRadians(geoTop.latitude)
-            // Bottom pixel geographic lat (osmdroid: y=0 is top of screen, higher y = lower lat)
-            val latBotRad = Math.toRadians(geoBot.latitude)
-
             // dot(sunVec, pointVec) < 0 → night
             // dot = sin(lat)*sinSunLat + cos(lat)*cosSunLat*cosLonDiff
-            val dotTop = sin(latTopRad) * sinSunLat + cos(latTopRad) * cosSunLat * cosLonDiff
-            val dotBot = sin(latBotRad) * sinSunLat + cos(latBotRad) * cosSunLat * cosLonDiff
+            val dotTop = sinLatTop * sinSunLat + cosLatTop * cosSunLat * cosLonDiff
+            val dotBot = sinLatBot * sinSunLat + cosLatBot * cosSunLat * cosLonDiff
 
             when {
                 dotTop < 0 && dotBot < 0 -> {
@@ -109,8 +116,9 @@ class MapNightOverlay : Overlay() {
 
                 else -> {
                     // Terminator crosses this column — find the crossing pixel by binary search
-                    val crossY = findCrossingY(proj, x, 0, h - 1, sinSunLat, cosSunLat, cosLonDiff)
-                    if (dotTop < 0) {
+                    val isNightAtTop = dotTop < 0
+                    val crossY = findCrossingY(proj, x, 0, h - 1, sinSunLat, cosSunLat, cosLonDiff, isNightAtTop)
+                    if (isNightAtTop) {
                         // Night at top, day at bottom
                         rect.set(x.toFloat(), 0f, (x + stepPx).toFloat(), crossY.toFloat())
                         canvas.drawRect(rect, nightPaint)
@@ -127,7 +135,11 @@ class MapNightOverlay : Overlay() {
 
     /**
      * Binary-search for the pixel row where the day/night boundary crosses column [x].
-     * [yTop] is in day, [yBot] is in night (or vice versa).
+     *
+     * [isNightAtTop] states which side [yTop] is on. Both polarities occur: the pole nearest
+     * the sub-solar point is lit, so the terminator runs day-over-night while the sub-solar
+     * latitude is positive and night-over-day once it turns negative after the September
+     * equinox. Anchoring lo to the top pixel's side keeps the search valid either way.
      */
     private fun findCrossingY(
         proj: org.osmdroid.views.Projection,
@@ -136,16 +148,18 @@ class MapNightOverlay : Overlay() {
         yBot: Int,
         sinSunLat: Double,
         cosSunLat: Double,
-        cosLonDiff: Double
+        cosLonDiff: Double,
+        isNightAtTop: Boolean
     ): Int {
         var lo = yTop
         var hi = yBot
         while (hi - lo > 1) {
             val mid = (lo + hi) / 2
-            val geo = proj.fromPixels(x, mid) ?: return mid
+            val geo = proj.fromPixels(x, mid, reusableGeoPoint) ?: return mid
             val latRad = Math.toRadians(geo.latitude)
             val dot = sin(latRad) * sinSunLat + cos(latRad) * cosSunLat * cosLonDiff
-            if (dot < 0) hi = mid else lo = mid
+            // Keep lo on the top pixel's side of the terminator and hi on the opposite side
+            if ((dot < 0) == isNightAtTop) lo = mid else hi = mid
         }
         return (lo + hi) / 2
     }

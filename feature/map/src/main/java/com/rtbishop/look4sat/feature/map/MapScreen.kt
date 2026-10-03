@@ -62,7 +62,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.rtbishop.look4sat.core.domain.predict.GeoPos
 import com.rtbishop.look4sat.core.domain.predict.OrbitalObject
-import com.rtbishop.look4sat.core.domain.predict.OrbitalPos
 import com.rtbishop.look4sat.core.domain.repository.IContainerProvider
 import com.rtbishop.look4sat.core.presentation.IconCard
 import com.rtbishop.look4sat.core.presentation.NextPassRow
@@ -71,6 +70,10 @@ import com.rtbishop.look4sat.core.presentation.TimerRow
 import com.rtbishop.look4sat.core.presentation.TopBar
 import com.rtbishop.look4sat.core.presentation.isVerticalLayout
 import com.rtbishop.look4sat.core.presentation.layoutPadding
+import org.osmdroid.events.DelayedMapListener
+import org.osmdroid.events.MapListener
+import org.osmdroid.events.ScrollEvent
+import org.osmdroid.events.ZoomEvent
 import org.osmdroid.tileprovider.tilesource.XYTileSource
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.CustomZoomButtonsController
@@ -119,6 +122,39 @@ private val moonIconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         android.graphics.PorterDuffColorFilter("#E0E0E0".toColorInt(), android.graphics.PorterDuff.Mode.SRC_IN)
 }
 
+/** Accent used for the station marker; recolored per theme so it stays visible on a light map. */
+private var mapAccentColor = "#FFE082".toColorInt()
+
+/** The dark-map filter (grayscale + invert) is only applied when NOT in light theme; cached to avoid rebuilds. */
+private val darkTileFilter by lazy { createColorFilter() }
+
+/**
+ * Recolor the shared overlay paints for the current theme. The light OSM tiles are white, so the
+ * dark-theme amber/grey overlays would vanish; light theme swaps them for dark, high-contrast colors.
+ * Must run before the set*() overlay builders on each frame, as several icons cache the paint color.
+ */
+private fun applyMapColors(isLightUi: Boolean) {
+    if (isLightUi) {
+        mapAccentColor = "#715C0C".toColorInt() // dark amber (matches app lightScheme primary)
+        footprintPaint.color = mapAccentColor
+        textPaint.color = "#1E1B13".toColorInt()
+        textPaint.setShadowLayer(3f, 3f, 3f, Color.WHITE)
+        sunIconPaint.colorFilter =
+            android.graphics.PorterDuffColorFilter(mapAccentColor, android.graphics.PorterDuff.Mode.SRC_IN)
+        moonIconPaint.colorFilter =
+            android.graphics.PorterDuffColorFilter("#4C4639".toColorInt(), android.graphics.PorterDuff.Mode.SRC_IN)
+    } else {
+        mapAccentColor = "#FFE082".toColorInt()
+        footprintPaint.color = mapAccentColor
+        textPaint.color = mapAccentColor
+        textPaint.setShadowLayer(3f, 3f, 3f, Color.BLACK)
+        sunIconPaint.colorFilter =
+            android.graphics.PorterDuffColorFilter(mapAccentColor, android.graphics.PorterDuff.Mode.SRC_IN)
+        moonIconPaint.colorFilter =
+            android.graphics.PorterDuffColorFilter("#E0E0E0".toColorInt(), android.graphics.PorterDuff.Mode.SRC_IN)
+    }
+}
+
 @Composable
 fun MapDestination() {
     val context = LocalContext.current
@@ -126,6 +162,21 @@ fun MapDestination() {
     val viewModel: MapViewModel = viewModel(factory = MapViewModel.factory(container))
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val mapView = rememberMapViewWithLifecycle()
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> viewModel.onAction(MapAction.SetVisible(true))
+                Lifecycle.Event.ON_STOP -> viewModel.onAction(MapAction.SetVisible(false))
+                else -> {}
+            }
+        }
+        lifecycle.addObserver(observer)
+        onDispose {
+            lifecycle.removeObserver(observer)
+            viewModel.onAction(MapAction.SetVisible(false))
+        }
+    }
     MapScreen(uiState, viewModel::onAction, mapView)
 }
 
@@ -159,6 +210,8 @@ private fun MapScreen(uiState: MapState, onAction: (MapAction) -> Unit, mapView:
         ElevatedCard(modifier = Modifier.weight(1f)) {
             Box(contentAlignment = Alignment.BottomCenter) {
                 AndroidView({ mapView }) { view ->
+                    applyMapColors(uiState.isLightUi)
+                    view.overlayManager.tilesOverlay.setColorFilter(if (uiState.isLightUi) null else darkTileFilter)
                     uiState.stationPosition?.let { setStationPosition(it, view) }
                     uiState.track?.let { setSatelliteTrack(it, view) }
                     uiState.footprint?.let { setFootprint(it, view) }
@@ -270,7 +323,9 @@ private fun setStationPosition(stationPos: GeoPos, mapView: MapView) {
             mapView.overlays[OVERLAY_STATION] = Marker(mapView).apply {
                 setInfoWindow(null)
                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-                icon = ContextCompat.getDrawable(mapView.context, R.drawable.ic_position)
+                icon = ContextCompat.getDrawable(mapView.context, R.drawable.ic_position)?.apply {
+                    setTint(mapAccentColor)
+                }
                 position = GeoPoint(stationPos.latitude, stationPos.longitude)
             }
         }
@@ -283,19 +338,49 @@ private fun setStationPosition(stationPos: GeoPos, mapView: MapView) {
 private val markerPool = HashMap<String, Marker>()
 private var lastMapView: MapView? = null
 
+/**
+ * Above this many satellites inside the viewport labels are dropped in favor of a single
+ * shared dot icon. Per-satellite label bitmaps cost ~90KB each, so drawing thousands of them
+ * exhausts memory and stalls the UI thread — and overlapping labels are unreadable anyway.
+ */
+private const val LABEL_LIMIT = 128
+
+/** Degrees of space around the viewport so markers don't pop in at the edges */
+private const val VIEWPORT_MARGIN = 8.0
+
+/** Debounce for viewport-driven marker refreshes, in milliseconds */
+private const val MAP_LISTENER_DELAY = 128L
+
+/** Shared dot icon used when too many satellites are visible to label them */
+private var dotIcon: Drawable? = null
+
+/** Scratch list reused every frame to avoid per-tick allocation */
+private val visibleSats = ArrayList<Pair<OrbitalObject, GeoPos>>()
+
+/** Last emitted positions, replayed on scroll/zoom so culled markers appear without waiting for a tick */
+private var lastPositions: Map<OrbitalObject, GeoPos>? = null
+private var lastAction: ((OrbitalObject) -> Unit)? = null
+
 private fun setPositions(
     posMap: Map<OrbitalObject, GeoPos>,
     mapView: MapView,
     action: (OrbitalObject) -> Unit
 ) {
     try {
+        lastPositions = posMap
+        lastAction = action
         // Clear caches when the MapView instance changes (e.g. config change)
         if (lastMapView !== mapView) {
             lastMapView = mapView
             markerPool.clear()
             iconCache.evictAll()
+            dotIcon = null
             footprintPolyline = null
             footprintPoints = null
+            mapView.addMapListener(DelayedMapListener(object : MapListener {
+                override fun onScroll(event: ScrollEvent?) = refreshPositions(mapView)
+                override fun onZoom(event: ZoomEvent?) = refreshPositions(mapView)
+            }, MAP_LISTENER_DELAY))
         }
         // Reuse the existing FolderOverlay — creating a new one and replacing it
         // causes osmdroid to detach shared Marker objects, making them invisible.
@@ -304,17 +389,48 @@ private fun setPositions(
         }
         folder.items.clear()
 
-        val activeNames = HashSet<String>(posMap.size)
-        posMap.forEach { (satellite, geoPos) ->
+        // Cull satellites outside the viewport: only meaningful once zoomed in, but that is
+        // exactly when marker labels are shown and drawing is most expensive.
+        visibleSats.clear()
+        if (mapView.width > 0 && mapView.height > 0) {
+            val box = mapView.boundingBox
+            val latNorth = box.latNorth + VIEWPORT_MARGIN
+            val latSouth = box.latSouth - VIEWPORT_MARGIN
+            val lonWest = box.lonWest - VIEWPORT_MARGIN
+            val lonEast = box.lonEast + VIEWPORT_MARGIN
+            val wrapsDateLine = box.lonWest > box.lonEast
+            for ((satellite, geoPos) in posMap) {
+                val lat = geoPos.latitude
+                if (lat !in latSouth..latNorth) continue
+                val lon = geoPos.longitude
+                val isLonVisible = if (wrapsDateLine) lon >= lonWest || lon <= lonEast
+                else lon in lonWest..lonEast
+                if (isLonVisible) visibleSats.add(satellite to geoPos)
+            }
+        } else {
+            for (entry in posMap) visibleSats.add(entry.key to entry.value)
+        }
+
+        val showLabels = visibleSats.size <= LABEL_LIMIT
+        val activeNames = HashSet<String>(visibleSats.size)
+        for ((satellite, geoPos) in visibleSats) {
             val name = satellite.data.name
             activeNames.add(name)
             val marker = markerPool.getOrPut(name) {
                 Marker(mapView).apply {
                     setInfoWindow(null)
                     setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                    icon = getCachedTextIcon(name, mapView)
+                    // Resolve the satellite via relatedObject so the listener is allocated
+                    // once per marker instead of once per satellite per tick
+                    setOnMarkerClickListener { clicked, _ ->
+                        (clicked.relatedObject as? OrbitalObject)?.let(action)
+                        true
+                    }
                 }
             }
+            marker.relatedObject = satellite
+            val icon = if (showLabels) getCachedTextIcon(name, mapView) else getDotIcon(mapView)
+            if (marker.icon !== icon) marker.icon = icon
             // Update position in-place — reuse existing GeoPoint if available
             val pos = marker.position
             if (pos != null) {
@@ -323,20 +439,30 @@ private fun setPositions(
             } else {
                 marker.position = GeoPoint(geoPos.latitude, geoPos.longitude)
             }
-            marker.setOnMarkerClickListener { _, _ ->
-                action(satellite)
-                true
-            }
             folder.add(marker)
         }
-        // Evict markers for satellites no longer tracked
-        val iter = markerPool.keys.iterator()
-        while (iter.hasNext()) {
-            if (iter.next() !in activeNames) iter.remove()
-        }
+        // Evict markers that are no longer tracked or no longer visible
+        markerPool.keys.retainAll(activeNames)
+        visibleSats.clear()
     } catch (e: Exception) {
         println(e)
     }
+}
+
+/** Re-applies the last known positions against the new viewport after a pan or zoom */
+private fun refreshPositions(mapView: MapView): Boolean {
+    val posMap = lastPositions ?: return false
+    val action = lastAction ?: return false
+    setPositions(posMap, mapView, action)
+    mapView.invalidate()
+    return true
+}
+
+private fun getDotIcon(mapView: MapView): Drawable = dotIcon ?: run {
+    val size = 20
+    val bitmap = createBitmap(size, size)
+    Canvas(bitmap).drawCircle(size / 2f, size / 2f, size / 2f - 2f, textPaint)
+    bitmap.toDrawable(mapView.context.resources).also { dotIcon = it }
 }
 
 private fun getCachedTextIcon(name: String, mapView: MapView): Drawable {
@@ -376,9 +502,8 @@ private fun setSatelliteTrack(satTrack: List<List<GeoPos>>, mapView: MapView) {
 private var footprintPolyline: Polyline? = null
 private var footprintPoints: ArrayList<GeoPoint>? = null
 
-private fun setFootprint(orbitalPos: OrbitalPos, mapView: MapView) {
+private fun setFootprint(rangeCircle: List<GeoPos>, mapView: MapView) {
     try {
-        val rangeCircle = orbitalPos.getRangeCircle()
         var pts = footprintPoints
         if (pts == null || pts.size != rangeCircle.size) {
             pts = ArrayList(rangeCircle.size)
@@ -497,7 +622,7 @@ private fun rememberMapViewWithLifecycle(): MapView {
             zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
             overlayManager.tilesOverlay.loadingBackgroundColor = Color.TRANSPARENT
             overlayManager.tilesOverlay.loadingLineColor = Color.TRANSPARENT
-            overlayManager.tilesOverlay.setColorFilter(createColorFilter())
+            // Tile color filter (dark inversion vs light) is applied per-theme in the AndroidView update block.
             setScrollableAreaLimitLatitude(maxLat, minLat, 0)
             overlays.addAll(Array(OVERLAY_COUNT) { FolderOverlay() })
         }
@@ -508,7 +633,26 @@ private fun rememberMapViewWithLifecycle(): MapView {
         lifecycle.addObserver(lifecycleObserver)
         onDispose { lifecycle.removeObserver(lifecycleObserver) }
     }
+    // The overlay caches below are file-level (shared across MapView instances), so they must be
+    // released with the MapView or they keep the Activity and its bitmaps alive after disposal.
+    DisposableEffect(mapView) {
+        onDispose {
+            clearMapCaches()
+            mapView.onDetach()
+        }
+    }
     return mapView
+}
+
+private fun clearMapCaches() {
+    markerPool.clear()
+    iconCache.evictAll()
+    dotIcon = null
+    footprintPolyline = null
+    footprintPoints = null
+    lastPositions = null
+    lastAction = null
+    lastMapView = null
 }
 
 @Composable

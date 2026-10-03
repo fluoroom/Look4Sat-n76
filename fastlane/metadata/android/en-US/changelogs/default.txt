@@ -1,7 +1,6 @@
-* Added AMSAT status tracking page by MCKero6423 (#234)
-* Tweaked Radar track on reposition by atsunatsu (#235)
-* Tweaked linear transponder calc by atsunatsu (#236)
-* Added saving per-sat doppler offset by atsunatsu (#237)
-* Added custom freq offset setting to network reporting
-* Added ability to customize data sources via import
-* Fixed star chart in README by PingouinFerreux (#240)
+* Fixed AOS window filter to follow the UTC setting by wty2019wty (#252)
+* Applied elevation color thresholds to the Radar by atsunatsu (#253)
+* Added fuzzy satellite search ignoring separators by atsunatsu (#255)
+* Added light theme suitable for e-ink devices by Ondrej Kolonicny (#256)
+* Fixed IC-705 frequency read in dual-radio mode by Michael S (#260)
+* Fixed day/night map overlay calculation and display issue by rt-bishop

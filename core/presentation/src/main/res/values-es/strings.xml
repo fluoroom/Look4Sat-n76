@@ -121,6 +121,8 @@
     <string name="prefs_data_sources_restore">Restaurar fuentes predeterminadas</string>
     <string name="prefs_data_sources_sat_title">Datos de satélites</string>
     <string name="prefs_data_sources_transceivers_title">Datos de transceptores</string>
+    <string name="prefs_data_sources_sat_hint">Prioridad arriba: nombres de satélites</string>
+    <string name="prefs_data_sources_transceivers_hint">Prioridad arriba: datos de transceptores</string>
     <string name="prefs_data_sources_tle_switch">URL TLE</string>
     <string name="prefs_data_sources_transceivers_switch">URL transceptores</string>
     <string name="prefs_data_sources_url_title" translatable="false">URL (HTTPS)</string>
@@ -159,10 +161,13 @@
 
     <string name="prefs_other_title">Otros</string>
     <string name="prefs_other_switch_utc">Hora UTC</string>
-    <string name="prefs_other_switch_update">Actualización automática</string>
+    <string name="prefs_other_switch_update">Auto-actualizar</string>
     <string name="prefs_other_switch_sweep">Animación radar</string>
     <string name="prefs_other_switch_sensors">Sensores</string>
     <string name="prefs_other_switch_night_mode">Filtro nocturno</string>
+    <string name="prefs_other_switch_light_theme">Tema claro</string>
+    <string name="prefs_other_compass_offset_az">Desfase de brújula (ácimut)</string>
+    <string name="prefs_other_compass_offset_elev">Desfase de brújula (elevación)</string>
 
     <string name="prefs_highlight_title">Resaltado de elevación</string>
     <string name="prefs_highlight_low">Baja &lt; %1$d°</string>

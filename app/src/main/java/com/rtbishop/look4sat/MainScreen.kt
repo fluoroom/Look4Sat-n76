@@ -68,6 +68,7 @@ import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
 import com.rtbishop.look4sat.core.domain.repository.IContainerProvider
+import com.rtbishop.look4sat.core.presentation.R
 import com.rtbishop.look4sat.core.domain.repository.RadioTrackingState
 import com.rtbishop.look4sat.core.presentation.DeeplinkResolver
 import com.rtbishop.look4sat.core.presentation.ElevationThresholds
@@ -98,29 +99,43 @@ fun NavRoot(deeplink: String? = null) {
     // Reverse: outgoing slides out to the right, incoming drifts in from the left
     val popTransition = slideInHorizontally(tween(300)) { -it / 3 } togetherWith
         slideOutHorizontally(tween(300)) { it }
-    NavDisplay(
-        modifier = Modifier.fillMaxSize(),
-        backStack = rootBackStack,
-        onBack = navigateBack,
-        transitionSpec = { pushTransition },
-        popTransitionSpec = { popTransition },
-        predictivePopTransitionSpec = { popTransition },
-        entryDecorators = listOf(
-            rememberSaveableStateHolderNavEntryDecorator(),
-            rememberViewModelStoreNavEntryDecorator()
-        ),
-        entryProvider = entryProvider {
-            entry<Screen.Passes> { MainScreen(navigateToRadar = navigateToRadar) }
-            entry<RadarDestination> {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    RadarDestination(navigateUp = navigateBack)
+    // Elevation color thresholds must be provided at the root level so that BOTH
+    // the tab content (MainScreen) and the root-level RadarDestination see the
+    // user's custom thresholds. RadarDestination is a sibling entry of MainScreen
+    // in this NavDisplay, so a provider inside MainScreen never reaches it.
+    val context = LocalContext.current
+    val container = (context.applicationContext as IContainerProvider).getMainContainer()
+    val otherSettings by container.settingsRepo.otherSettings.collectAsStateWithLifecycle()
+    CompositionLocalProvider(
+        LocalElevationThresholds provides ElevationThresholds(
+            low = otherSettings.lowElevation,
+            high = otherSettings.highElevation
+        )
+    ) {
+        NavDisplay(
+            modifier = Modifier.fillMaxSize(),
+            backStack = rootBackStack,
+            onBack = navigateBack,
+            transitionSpec = { pushTransition },
+            popTransitionSpec = { popTransition },
+            predictivePopTransitionSpec = { popTransition },
+            entryDecorators = listOf(
+                rememberSaveableStateHolderNavEntryDecorator(),
+                rememberViewModelStoreNavEntryDecorator()
+            ),
+            entryProvider = entryProvider {
+                entry<Screen.Passes> { MainScreen(navigateToRadar = navigateToRadar) }
+                entry<RadarDestination> {
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = MaterialTheme.colorScheme.background
+                    ) {
+                        RadarDestination(navigateUp = navigateBack)
+                    }
                 }
             }
-        }
-    )
+        )
+    }
 }
 
 @Composable
@@ -128,7 +143,6 @@ private fun MainScreen(navigateToRadar: () -> Unit = {}) {
     val context = LocalContext.current
     val container = (context.applicationContext as IContainerProvider).getMainContainer()
     val trackingState by container.radioTrackingService.state.collectAsStateWithLifecycle()
-    val otherSettings by container.settingsRepo.otherSettings.collectAsStateWithLifecycle()
 
     val backStack = rememberNavBackStack(Screen.Passes)
     val currentKey = backStack.lastOrNull()
@@ -138,88 +152,81 @@ private fun MainScreen(navigateToRadar: () -> Unit = {}) {
     val navItems =
         listOf(Screen.Satellites, Screen.Passes, Screen.Status, Screen.Map, Screen.Settings)
 
-    CompositionLocalProvider(
-        LocalElevationThresholds provides ElevationThresholds(
-            low = otherSettings.lowElevation,
-            high = otherSettings.highElevation
-        )
-    ) {
-        NavigationSuiteScaffold(
-            navigationSuiteItems = {
-                navItems.forEach { screen ->
-                    val isSelected = when (currentKey) {
-                        is Screen.Satellites -> screen is Screen.Satellites
-                        is Screen.Passes -> screen is Screen.Passes
-                        is Screen.Status -> screen is Screen.Status
-                        is Screen.Map -> screen is Screen.Map
-                        is Screen.Settings -> screen is Screen.Settings
-                        else -> false
-                    }
-                    item(
-                        icon = {
-                            Icon(
-                                painter = painterResource(screen.iconResId),
-                                contentDescription = stringResource(screen.titleResId)
-                            )
-                        },
-                        label = { Text(stringResource(screen.titleResId)) },
-                        selected = isSelected,
-                        onClick = {
-                            if (isSelected) return@item
-                            while (backStack.size > 1) backStack.removeAt(backStack.size - 1)
-                            if (screen !is Screen.Passes) backStack.add(screen)
-                        }
-                    )
+    NavigationSuiteScaffold(
+        navigationSuiteItems = {
+            navItems.forEach { screen ->
+                val isSelected = when (currentKey) {
+                    is Screen.Satellites -> screen is Screen.Satellites
+                    is Screen.Passes -> screen is Screen.Passes
+                    is Screen.Status -> screen is Screen.Status
+                    is Screen.Map -> screen is Screen.Map
+                    is Screen.Settings -> screen is Screen.Settings
+                    else -> false
                 }
-            },
-            navigationSuiteColors = NavigationSuiteDefaults.colors(
-                navigationRailContainerColor = MaterialTheme.colorScheme.surfaceContainer
-            ),
-            layoutType = when {
-                !hasEnoughHeight() && hasEnoughWidth() -> NavigationSuiteType.NavigationRail
-                !hasEnoughWidth() -> NavigationSuiteType.ShortNavigationBarCompact
-                else -> NavigationSuiteType.ShortNavigationBarMedium
-            }
-        ) {
-            Column {
-                NavDisplay(
-                    backStack = backStack,
-                    modifier = Modifier.weight(1f),
-                    onBack = navigateBack,
-                    transitionSpec = { fadeTransition },
-                    popTransitionSpec = { fadeTransition },
-                    predictivePopTransitionSpec = { fadeTransition },
-                    entryDecorators = listOf(
-                        rememberSaveableStateHolderNavEntryDecorator(),
-                        rememberViewModelStoreNavEntryDecorator()
-                    ),
-                    entryProvider = entryProvider {
-                        entry<Screen.Satellites> {
-                            SatellitesDestination(navigateUp = navigateBack)
-                        }
-                        entry<Screen.Passes> {
-                            PassesDestination { catNum, aosTime ->
-                                container.satelliteRepo.selectPass(catNum, aosTime)
-                                navigateToRadar()
-                            }
-                        }
-                        entry<Screen.Status> { SatStatusDestination() }
-                        entry<Screen.Map> { MapDestination() }
-                        entry<Screen.Settings> { SettingsDestination() }
+                item(
+                    icon = {
+                        Icon(
+                            painter = painterResource(screen.iconResId),
+                            contentDescription = stringResource(screen.titleResId)
+                        )
+                    },
+                    label = { Text(stringResource(screen.titleResId)) },
+                    selected = isSelected,
+                    onClick = {
+                        if (isSelected) return@item
+                        while (backStack.size > 1) backStack.removeAt(backStack.size - 1)
+                        if (screen !is Screen.Passes) backStack.add(screen)
                     }
                 )
-                if (trackingState.isActive) {
-                    TrackingBanner(
-                        state = trackingState,
-                        onClick = {
-                            val pass = trackingState.currentPass
-                            if (pass != null) {
-                                container.satelliteRepo.selectPass(pass.catNum, pass.aosTime)
-                                navigateToRadar()
-                            }
+            }
+        },
+        navigationSuiteColors = NavigationSuiteDefaults.colors(
+            navigationRailContainerColor = MaterialTheme.colorScheme.surfaceContainer
+        ),
+        layoutType = when {
+            !hasEnoughHeight() && hasEnoughWidth() -> NavigationSuiteType.NavigationRail
+            !hasEnoughWidth() -> NavigationSuiteType.ShortNavigationBarCompact
+            else -> NavigationSuiteType.ShortNavigationBarMedium
+        }
+    ) {
+        Column {
+            NavDisplay(
+                backStack = backStack,
+                modifier = Modifier.weight(1f),
+                onBack = navigateBack,
+                transitionSpec = { fadeTransition },
+                popTransitionSpec = { fadeTransition },
+                predictivePopTransitionSpec = { fadeTransition },
+                entryDecorators = listOf(
+                    rememberSaveableStateHolderNavEntryDecorator(),
+                    rememberViewModelStoreNavEntryDecorator()
+                ),
+                entryProvider = entryProvider {
+                    entry<Screen.Satellites> {
+                        SatellitesDestination(navigateUp = navigateBack)
+                    }
+                    entry<Screen.Passes> {
+                        PassesDestination { catNum, aosTime ->
+                            container.satelliteRepo.selectPass(catNum, aosTime)
+                            navigateToRadar()
                         }
-                    )
+                    }
+                    entry<Screen.Status> { SatStatusDestination() }
+                    entry<Screen.Map> { MapDestination() }
+                    entry<Screen.Settings> { SettingsDestination() }
                 }
+            )
+            if (trackingState.isActive) {
+                TrackingBanner(
+                    state = trackingState,
+                    onClick = {
+                        val pass = trackingState.currentPass
+                        if (pass != null) {
+                            container.satelliteRepo.selectPass(pass.catNum, pass.aosTime)
+                            navigateToRadar()
+                        }
+                    }
+                )
             }
         }
     }
@@ -252,7 +259,7 @@ private fun TrackingBanner(state: RadioTrackingState, onClick: () -> Unit) {
         )
         Spacer(modifier = Modifier.width(8.dp))
         Text(
-            text = "Tracking: ${state.currentPass?.name ?: ""}",
+            text = stringResource(R.string.tracking_format, state.currentPass?.name ?: ""),
             fontSize = 13.sp,
             fontWeight = FontWeight.Medium,
             color = MaterialTheme.colorScheme.onPrimaryContainer,

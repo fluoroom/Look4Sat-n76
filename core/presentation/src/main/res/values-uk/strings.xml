@@ -121,6 +121,8 @@
     <string name="prefs_data_sources_restore">Відновити джерела за замовчуванням</string>
     <string name="prefs_data_sources_sat_title">Дані супутників</string>
     <string name="prefs_data_sources_transceivers_title">Дані трансиверів</string>
+    <string name="prefs_data_sources_sat_hint">Пріоритет зверху: назви супутників</string>
+    <string name="prefs_data_sources_transceivers_hint">Пріоритет зверху: дані трансиверів</string>
     <string name="prefs_data_sources_tle_switch">URL TLE</string>
     <string name="prefs_data_sources_transceivers_switch">URL трансиверів</string>
     <string name="prefs_data_sources_url_title" translatable="false">URL (HTTPS)</string>
@@ -159,10 +161,13 @@
 
     <string name="prefs_other_title">Інше</string>
     <string name="prefs_other_switch_utc">Час в UTC</string>
-    <string name="prefs_other_switch_update">Автооновлення даних</string>
+    <string name="prefs_other_switch_update">Автооновлення</string>
     <string name="prefs_other_switch_sweep">Анімація радара</string>
     <string name="prefs_other_switch_sensors">Сенсори</string>
     <string name="prefs_other_switch_night_mode">Нічний фільтр</string>
+    <string name="prefs_other_switch_light_theme">Світла тема</string>
+    <string name="prefs_other_compass_offset_az">Зміщення компаса (азимут)</string>
+    <string name="prefs_other_compass_offset_elev">Зміщення компаса (піднесення)</string>
 
     <string name="prefs_highlight_title">Підсвічування висоти</string>
     <string name="prefs_highlight_low">Низько &lt; %1$d°</string>

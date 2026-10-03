@@ -193,7 +193,7 @@ private fun SettingsScreen(uiState: SettingsState, onAction: (SettingsAction) ->
 
     // URLs for top bar
     val uriHandler = LocalUriHandler.current
-    val appUrl = stringResource(R.string.prefs_app_url)
+//    val appUrl = stringResource(R.string.prefs_app_url)
     val donateUrl = stringResource(R.string.prefs_donate_url)
     val fdroidTitle = stringResource(R.string.prefs_fdroid_title)
     val fdroidUrl = stringResource(R.string.prefs_fdroid_url)
@@ -214,7 +214,7 @@ private fun SettingsScreen(uiState: SettingsState, onAction: (SettingsAction) ->
                         version = uiState.appVersionName,
                         modifier = Modifier.weight(1f)
                     )
-                    PrimaryIconCard(onClick = { safeOpenUri(donateUrl) }, resId = R.drawable.ic_like)
+                    PrimaryIconCard(onClick = { safeOpenUri(donateUrl) }, resId = R.drawable.ic_pound)
                 }
                 TopBar {
                     Row(modifier = Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -236,7 +236,7 @@ private fun SettingsScreen(uiState: SettingsState, onAction: (SettingsAction) ->
                 }
             } else {
                 TopBar {
-                    PrimaryIconCard(onClick = { safeOpenUri(donateUrl) }, resId = R.drawable.ic_like)
+                    PrimaryIconCard(onClick = { safeOpenUri(donateUrl) }, resId = R.drawable.ic_pound)
                     TopCard(
                         onClick = { dialogs.whatsNew = true },
                         version = uiState.appVersionName,
@@ -347,9 +347,9 @@ private fun LocationCard(
             Text(text = formatUpdateTime(updateTime = settings.stationPos.timestamp))
             Spacer(modifier = Modifier.height(2.dp))
             Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                Text(text = "Lat: ${settings.stationPos.latitude}°")
-                Text(text = "Lon: ${settings.stationPos.longitude}°")
-                Text(text = "Qth: ${settings.stationPos.qthLocator}")
+                Text(text = stringResource(R.string.prefs_lat_prefix, settings.stationPos.latitude))
+                Text(text = stringResource(R.string.prefs_lon_prefix, settings.stationPos.longitude))
+                Text(text = stringResource(R.string.prefs_qth_prefix, settings.stationPos.qthLocator))
             }
             Spacer(modifier = Modifier.height(1.dp))
             Row(horizontalArrangement = Arrangement.SpaceEvenly) {
@@ -500,17 +500,31 @@ private fun OtherCard(settings: OtherSettings, onAction: (SettingsAction) -> Uni
                 color = MaterialTheme.colorScheme.primary
             )
             Spacer(modifier = Modifier.height(4.dp))
-            // Display preferences: UTC clock + night filter
+            // Data preferences: auto-update + UTC clock
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SwitchTile(R.string.prefs_other_switch_update, settings.stateOfAutoUpdate) {
+                    onAction(SettingsAction.ToggleUpdate(it))
+                }
                 SwitchTile(R.string.prefs_other_switch_utc, settings.stateOfUtc) {
                     onAction(SettingsAction.ToggleUtc(it))
                 }
-                SwitchTile(R.string.prefs_other_switch_night_mode, settings.stateOfNightMode) {
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            // Appearance: light theme + night filter
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SwitchTile(R.string.prefs_other_switch_light_theme, settings.stateOfLightTheme) {
+                    onAction(SettingsAction.ToggleLightTheme(it))
+                }
+                SwitchTile(
+                    R.string.prefs_other_switch_night_mode,
+                    settings.stateOfNightMode,
+                    enabled = !settings.stateOfLightTheme
+                ) {
                     onAction(SettingsAction.ToggleNightMode(it))
                 }
             }
             Spacer(modifier = Modifier.height(4.dp))
-            // Radar behavior: sweep animation + sensor control
+            // Radar behavior: sweep animation + sensors, followed by the compass offset sliders
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 SwitchTile(R.string.prefs_other_switch_sweep, settings.stateOfSweep) {
                     onAction(SettingsAction.ToggleSweep(it))
@@ -520,14 +534,9 @@ private fun OtherCard(settings: OtherSettings, onAction: (SettingsAction) -> Uni
                 }
             }
             Spacer(modifier = Modifier.height(4.dp))
-            // Data management (full width)
-            SwitchRow(R.string.prefs_other_switch_update, settings.stateOfAutoUpdate) {
-                onAction(SettingsAction.ToggleUpdate(it))
-            }
-            Spacer(modifier = Modifier.height(4.dp))
             // Compass calibration sliders at the bottom
             CompassOffsetRow(
-                labelResId = R.string.prefs_other_compass_offset,
+                labelResId = R.string.prefs_other_compass_offset_az,
                 value = settings.radarCompassOffset,
                 range = -180f..180f
             ) { onAction(SettingsAction.SetRadarCompassOffset(it)) }
@@ -554,7 +563,14 @@ private fun CompassOffsetRow(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.fillMaxWidth()
     ) {
-        Text(text = stringResource(id = labelResId))
+        Text(
+            text = stringResource(id = labelResId),
+            modifier = Modifier
+                .weight(1f)
+                .padding(end = 4.dp)
+                .infiniteMarquee(),
+            maxLines = 1
+        )
         Text(text = "${value.toInt()}°")
     }
     Spacer(modifier = Modifier.height(4.dp))
@@ -566,19 +582,12 @@ private fun CompassOffsetRow(
 }
 
 @Composable
-private fun SwitchRow(labelResId: Int, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
-    Row(
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Text(text = stringResource(id = labelResId))
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
-    }
-}
-
-@Composable
-private fun RowScope.SwitchTile(labelResId: Int, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+private fun RowScope.SwitchTile(
+    labelResId: Int,
+    checked: Boolean,
+    enabled: Boolean = true,
+    onCheckedChange: (Boolean) -> Unit
+) {
     Row(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
@@ -586,9 +595,13 @@ private fun RowScope.SwitchTile(labelResId: Int, checked: Boolean, onCheckedChan
     ) {
         Text(
             text = stringResource(id = labelResId),
-            modifier = Modifier.weight(1f)
+            modifier = Modifier
+                .weight(1f)
+                .padding(end = 4.dp)
+                .infiniteMarquee(),
+            maxLines = 1
         )
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        Switch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange)
     }
 }
 
