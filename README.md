@@ -2,7 +2,7 @@
 
 [![Look4Sat CI](https://github.com/fluoroom/Look4Sat-n76/actions/workflows/release.yml/badge.svg)](https://github.com/fluoroom/Look4Sat-n76/actions/workflows/release.yml)
 
-### N76 fork of Look4Sat, for using the HYS N76 over Bluetooth.
+### N76 fork of Look4Sat, for using the VGC N76 over Bluetooth.
 
 ### !!! This fork must be downloaded from [releases page](https://github.com/fluoroom/Look4Sat-n76/releases), NOT app stores, until (maybe) the main Look4Sat project adopts these changes.
 
