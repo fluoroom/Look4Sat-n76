@@ -49,10 +49,14 @@ data class FilterCategory(
     val name: String = "",
     val modes: List<String> = emptyList(),
     val bands: List<String> = emptyList(),
-    val exclude: Boolean = false
+    val exclude: Boolean = false,
+    val enabled: Boolean = true
 ) {
     /** A category that constrains nothing is ignored, so an unfinished one can never hide everything. */
     val isEmpty: Boolean get() = modes.isEmpty() && bands.isEmpty()
+
+    /** Only active categories reach the filter; the rest are kept so they can be switched back on. */
+    val isActive: Boolean get() = enabled && !isEmpty
 }
 
 private val filterCategoryJson = Json { ignoreUnknownKeys = true }

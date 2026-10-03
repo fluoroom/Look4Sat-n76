@@ -77,6 +77,39 @@ class FilterCategoryTest {
     }
 
     @Test
+    fun `a switched-off category is ignored but kept`() {
+        // Off is not the same as deleted: the modes/bands survive for when it is switched back on.
+        val parked = sstv.copy(enabled = false)
+        assertEquals(sstv.modes, parked.modes)
+        assertFalse(parked.isActive)
+
+        // With the only include category off, nothing constrains the filter any more.
+        assertTrue(matches("BPSK", 145_900_000L, null, listOf(parked)))
+        // ...and a switched-off exclude stops subtracting.
+        val excludeUhf = FilterCategory("UHF", bands = listOf("U"), exclude = true)
+        assertFalse(matches("FM", 435_800_000L, null, listOf(excludeUhf)))
+        assertTrue(matches("FM", 435_800_000L, null, listOf(excludeUhf.copy(enabled = false))))
+    }
+
+    @Test
+    fun `switching one include off leaves the others filtering`() {
+        val categories = listOf(sstv, fmRepeaters.copy(enabled = false))
+        assertTrue(matches("FM", 145_800_000L, null, categories))
+        // The V/U repeater only passed through the category that is now off.
+        assertFalse(matches("FM", 435_600_000L, 145_900_000L, categories))
+    }
+
+    @Test
+    fun `the enabled flag round-trips and defaults to on for older stored filters`() {
+        val parked = sstv.copy(enabled = false)
+        assertEquals(listOf(parked), decodeFilterCategories(listOf(parked).encodeToString()))
+        // A filter stored before the flag existed has no "enabled" key and must come back active.
+        val legacy = decodeFilterCategories("""[{"name":"Old","modes":["FM"],"bands":["V"]}]""")
+        assertEquals(true, legacy?.single()?.enabled)
+        assertTrue(legacy!!.single().isActive)
+    }
+
+    @Test
     fun `a radio without a downlink frequency never matches`() {
         assertFalse(matches("FM", null, 145_900_000L, listOf(sstv)))
         assertFalse(matches("FM", null, 145_900_000L, emptyList()))

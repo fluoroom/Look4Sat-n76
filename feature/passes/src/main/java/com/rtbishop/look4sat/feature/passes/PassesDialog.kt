@@ -363,7 +363,8 @@ private fun TransponderDialogPreview() {
             categories = listOf(
                 FilterCategory("SSTV", listOf("FM", "SSTV"), listOf("V")),
                 FilterCategory("FM repeaters", listOf("FM", "FMN"), listOf("V/U")),
-                FilterCategory("Telemetry", listOf("BPSK", "GMSK"), emptyList(), exclude = true)
+                FilterCategory("Telemetry", listOf("BPSK", "GMSK"), emptyList(), exclude = true),
+                FilterCategory("L/S band", listOf("FM"), listOf("L/U", "S/U"), enabled = false)
             ),
             availableModes = listOf("BPSK", "FM", "FMN", "GMSK", "SSTV"),
             cancel = {}
@@ -416,6 +417,11 @@ internal fun TransponderDialog(
                     editBuffer.value = draft.value[index]
                     editIndex.value = index
                 },
+                onToggle = { index ->
+                    draft.value = draft.value.mapIndexed { i, category ->
+                        if (i == index) category.copy(enabled = !category.enabled) else category
+                    }
+                },
                 onDelete = { index -> draft.value = draft.value.filterIndexed { i, _ -> i != index } },
                 onAdd = {
                     editBuffer.value = FilterCategory(name = "Filter ${draft.value.size + 1}")
@@ -430,6 +436,7 @@ internal fun TransponderDialog(
 private fun CategoryList(
     categories: List<FilterCategory>,
     onEdit: (Int) -> Unit,
+    onToggle: (Int) -> Unit,
     onDelete: (Int) -> Unit,
     onAdd: () -> Unit
 ) {
@@ -442,7 +449,12 @@ private fun CategoryList(
         verticalArrangement = Arrangement.spacedBy(1.dp)
     ) {
         itemsIndexed(categories) { index, category ->
-            CategoryRow(category = category, onClick = { onEdit(index) }, onDelete = { onDelete(index) })
+            CategoryRow(
+                category = category,
+                onClick = { onEdit(index) },
+                onToggle = { onToggle(index) },
+                onDelete = { onDelete(index) }
+            )
         }
         item {
             Row(
@@ -477,9 +489,17 @@ private fun CategoryList(
 }
 
 @Composable
-private fun CategoryRow(category: FilterCategory, onClick: () -> Unit, onDelete: () -> Unit) {
+private fun CategoryRow(
+    category: FilterCategory,
+    onClick: () -> Unit,
+    onToggle: () -> Unit,
+    onDelete: () -> Unit
+) {
     val anyLabel = stringResource(R.string.pass_transponder_any)
     val unnamed = stringResource(R.string.pass_transponder_edit)
+    // A switched-off category keeps its sign and contents, just greyed out, so it reads as
+    // "still configured, not applied" rather than as an empty row.
+    val contentAlpha = if (category.enabled) 1f else 0.4f
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -487,12 +507,18 @@ private fun CategoryRow(category: FilterCategory, onClick: () -> Unit, onDelete:
             .background(MaterialTheme.colorScheme.surface)
             .clickable { onClick() }
     ) {
+        Checkbox(
+            checked = category.enabled,
+            onCheckedChange = { onToggle() },
+            modifier = Modifier.padding(start = 8.dp)
+        )
         Text(
             text = if (category.exclude) "\u2212" else "+",
             fontSize = 20.sp,
             fontWeight = FontWeight.Bold,
-            color = if (category.exclude) ElevationLowColor else ElevationHighColor,
-            modifier = Modifier.padding(start = 16.dp, end = 12.dp)
+            color = (if (category.exclude) ElevationLowColor else ElevationHighColor)
+                .copy(alpha = contentAlpha),
+            modifier = Modifier.padding(end = 12.dp)
         )
         Column(
             modifier = Modifier
@@ -502,13 +528,14 @@ private fun CategoryRow(category: FilterCategory, onClick: () -> Unit, onDelete:
             Text(
                 text = category.name.ifBlank { unnamed },
                 fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = contentAlpha),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             Text(
                 text = "${summarize(category.modes, anyLabel)} \u2022 ${summarize(category.bands, anyLabel)}",
                 fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = contentAlpha),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )

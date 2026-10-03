@@ -56,6 +56,8 @@ import com.rtbishop.look4sat.core.domain.model.SatDay
 import com.rtbishop.look4sat.core.domain.model.SatReport
 import com.rtbishop.look4sat.core.domain.model.SatSlot
 import com.rtbishop.look4sat.core.domain.model.SatStatus
+import com.rtbishop.look4sat.core.domain.utility.SatStatusRating
+import com.rtbishop.look4sat.core.domain.utility.SatStatusSort
 import com.rtbishop.look4sat.core.domain.repository.IContainerProvider
 import com.rtbishop.look4sat.core.presentation.CardButton
 import com.rtbishop.look4sat.core.presentation.InfoDialog
@@ -66,6 +68,7 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import kotlin.math.roundToInt
 
 /** Fixed width per day tile — tablet-safe; name column absorbs remaining space. */
 private val TILE_WIDTH: Dp = 64.dp
@@ -123,6 +126,7 @@ fun SatStatusDestination() {
     SatStatusScreen(
         uiState = uiState,
         refresh = viewModel::refresh,
+        onSortChange = viewModel::setSort,
         onToggleUpload = viewModel::toggleUploadPanel,
         onUploadReportChange = viewModel::setUploadReport,
         onUploadCallsignChange = viewModel::setUploadCallsign,
@@ -138,6 +142,7 @@ fun SatStatusDestination() {
 private fun SatStatusScreen(
     uiState: SatStatusUiState,
     refresh: () -> Unit,
+    onSortChange: (SatStatusSort) -> Unit,
     onToggleUpload: () -> Unit,
     onUploadReportChange: (String) -> Unit,
     onUploadCallsignChange: (String) -> Unit,
@@ -151,6 +156,7 @@ private fun SatStatusScreen(
     Column(modifier = Modifier.fillMaxSize().layoutPadding()) {
         StatusHeader(fetchedAtUtcMs = uiState.fetchedAtUtcMs, isRefreshing = uiState.isRefreshing, onRefresh = refresh)
         LegendRow()
+        SortRow(selected = uiState.sort, onSelect = onSortChange)
 
         when {
             uiState.isLoading -> {
@@ -173,7 +179,12 @@ private fun SatStatusScreen(
                 HorizontalDivider(thickness = 1.dp)
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
                     items(uiState.statuses, key = { it.name }) { status ->
-                        StatusRow(status = status, onClickDay = { day -> selectedDay = status to day })
+                        StatusRow(
+                            status = status,
+                            sort = uiState.sort,
+                            rating = uiState.ratings[status.name],
+                            onClickDay = { day -> selectedDay = status to day }
+                        )
                     }
                 }
             }
@@ -279,6 +290,70 @@ private fun LegendRow() {
     }
 }
 
+/**
+ * Sort selector. No time-range option: the AMSAT API clamps reports to the most recent 500
+ * (~33h) and ignores a wider `hours`, so a 1-week/1-month/1-year choice would rank identical
+ * data. Widening it needs locally accumulated history, not a different request.
+ */
+@Composable
+private fun SortRow(selected: SatStatusSort, onSelect: (SatStatusSort) -> Unit) {
+    val options = listOf(
+        SatStatusSort.Name to stringResource(id = R.string.amsat_sort_name),
+        SatStatusSort.LastHeard to stringResource(id = R.string.amsat_sort_recent),
+        SatStatusSort.BestHeard to stringResource(id = R.string.amsat_sort_best)
+    )
+    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                text = stringResource(id = R.string.amsat_sort),
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.align(Alignment.CenterVertically)
+            )
+            options.forEach { (sort, label) ->
+                FilterChip(
+                    selected = sort == selected,
+                    onClick = { onSelect(sort) },
+                    label = { Text(text = label, fontSize = 13.sp) }
+                )
+            }
+        }
+        if (selected == SatStatusSort.BestHeard) {
+            Text(
+                text = stringResource(id = R.string.amsat_sort_window_note),
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+        }
+    }
+}
+
+/** Secondary row line justifying the current ordering; null when the sort needs no explanation. */
+@Composable
+private fun ratingDetail(sort: SatStatusSort, rating: SatStatusRating?): String? = when (sort) {
+    SatStatusSort.Name -> null
+    SatStatusSort.LastHeard -> when (val hours = rating?.hoursSinceLastReport) {
+        null -> stringResource(id = R.string.amsat_sort_no_reports)
+        0 -> stringResource(id = R.string.amsat_sort_recent_now)
+        else -> stringResource(id = R.string.amsat_sort_recent_detail, hours)
+    }
+    SatStatusSort.BestHeard -> {
+        val ratio = rating?.heardRatio
+        if (ratio == null) stringResource(id = R.string.amsat_sort_no_reports)
+        else stringResource(
+            id = R.string.amsat_sort_best_detail,
+            (ratio * 100).roundToInt(),
+            rating.sampleCount
+        )
+    }
+}
+
 /** Header: satellite name column + fixed-width date labels aligned to tiles. */
 @Composable
 private fun HeaderRow(statuses: List<SatStatus>) {
@@ -309,19 +384,35 @@ private fun HeaderRow(statuses: List<SatStatus>) {
 
 /** Satellite row: name takes remaining width; day tiles are fixed-width (tablet-safe). */
 @Composable
-private fun StatusRow(status: SatStatus, onClickDay: (SatDay) -> Unit) {
+private fun StatusRow(
+    status: SatStatus,
+    sort: SatStatusSort,
+    rating: SatStatusRating?,
+    onClickDay: (SatDay) -> Unit
+) {
     val noReportGray = 0xFFC0C0C0L
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            text = status.name,
-            fontSize = 14.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f).padding(end = 4.dp)
-        )
+        Column(modifier = Modifier.weight(1f).padding(end = 4.dp)) {
+            Text(
+                text = status.name,
+                fontSize = 14.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            // Shown only for the data-driven sorts, where it is the reason for the row's position.
+            ratingDetail(sort, rating)?.let { detail ->
+                Text(
+                    text = detail,
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
         status.days.forEach { day ->
             val slot = day.slots.firstOrNull { it.statusColor != noReportGray } ?: day.slots.first()
             DayCell(

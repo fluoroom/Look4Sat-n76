@@ -11,6 +11,10 @@ import com.rtbishop.look4sat.core.domain.model.SatStatusPage
 import com.rtbishop.look4sat.core.domain.repository.IAmSatRepository
 import com.rtbishop.look4sat.core.domain.repository.IMainContainer
 import com.rtbishop.look4sat.core.domain.repository.ISettingsRepo
+import com.rtbishop.look4sat.core.domain.utility.SatStatusRating
+import com.rtbishop.look4sat.core.domain.utility.SatStatusSort
+import com.rtbishop.look4sat.core.domain.utility.rateAll
+import com.rtbishop.look4sat.core.domain.utility.sortedForDisplay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -40,8 +44,11 @@ data class AmSatUploadUiState(
 data class SatStatusUiState(
     val isLoading: Boolean = false,
     val isRefreshing: Boolean = false,
+    /** Already ordered by [sort]; the unsorted fetch is kept in the view model. */
     val statuses: List<SatStatus> = emptyList(),
     val reports: Map<String, SatReport> = emptyMap(),
+    val sort: SatStatusSort = SatStatusSort.Name,
+    val ratings: Map<String, SatStatusRating> = emptyMap(),
     val fetchedAtUtcMs: Long = 0L,
     val error: String? = null,
     val upload: AmSatUploadUiState = AmSatUploadUiState()
@@ -54,6 +61,9 @@ class SatStatusViewModel(
 
     private val _uiState = MutableStateFlow(SatStatusUiState(isLoading = true))
     val uiState: StateFlow<SatStatusUiState> = _uiState
+
+    // Fetch order, kept so re-sorting never has to go back to the network.
+    private var fetchedStatuses: List<SatStatus> = emptyList()
 
     init {
         fetch()
@@ -97,15 +107,25 @@ class SatStatusViewModel(
     }
 
     private fun applyStatusPage(page: SatStatusPage) {
+        fetchedStatuses = page.statuses
+        val ratings = page.statuses.rateAll(page.reports)
         _uiState.update {
             it.copy(
                 isLoading = false,
                 isRefreshing = false,
-                statuses = page.statuses,
+                statuses = page.statuses.sortedForDisplay(it.sort, ratings),
                 reports = page.reports,
+                ratings = ratings,
                 fetchedAtUtcMs = page.fetchedAtUtcMs,
                 error = null
             )
+        }
+    }
+
+    fun setSort(sort: SatStatusSort) {
+        _uiState.update {
+            if (it.sort == sort) it
+            else it.copy(sort = sort, statuses = fetchedStatuses.sortedForDisplay(sort, it.ratings))
         }
     }
 

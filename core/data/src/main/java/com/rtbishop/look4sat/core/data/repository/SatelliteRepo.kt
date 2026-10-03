@@ -155,7 +155,7 @@ class SatelliteRepo(
             val stationPos = settingsRepo.stationPosition.value
             // Emptiness of the *filter* decides, not emptiness of its result: an active filter
             // that matches nothing must yield no passes rather than falling back to every pass.
-            val filteredSatellites = if (categories.all { it.isEmpty }) {
+            val filteredSatellites = if (categories.none { it.isActive }) {
                 currentSatellites
             } else {
                 val matchingIds = localStorage.getIdsMatchingCategories(categories).toHashSet()

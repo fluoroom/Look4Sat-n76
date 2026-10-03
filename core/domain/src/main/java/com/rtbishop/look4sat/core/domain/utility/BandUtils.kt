@@ -72,7 +72,8 @@ fun SatRadio.matchesTransponderFilter(modes: List<String>, bands: List<String>):
     matchesTransponderFilter(downlinkMode, info, downlinkLow, uplinkLow, modes, bands)
 
 // Evaluates the category filter for a single radio: OR over the include categories, minus the
-// exclude ones. Empty categories are dropped first, so a half-filled one can't hide everything.
+// exclude ones. Inactive categories (switched off, or constraining nothing) are dropped first,
+// so neither a half-filled nor a disabled category can hide everything.
 // Deliberately per-radio, not per-satellite: the ISS has an FM voice downlink *and* telemetry
 // downlinks, so excluding telemetry must drop only that radio, never the whole satellite.
 fun matchesFilterCategories(
@@ -86,7 +87,7 @@ fun matchesFilterCategories(
     fun matches(category: FilterCategory) = matchesTransponderFilter(
         downlinkMode, info, downlinkLow, uplinkLow, category.modes, category.bands
     )
-    val active = categories.filterNot { it.isEmpty }
+    val active = categories.filter { it.isActive }
     if (active.isEmpty()) return true
     val (excludes, includes) = active.partition { it.exclude }
     if (includes.isNotEmpty() && includes.none { matches(it) }) return false

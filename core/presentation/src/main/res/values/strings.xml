@@ -54,6 +54,7 @@
     <string name="pass_transponder_hint">
         Each category matches a mode set AND a band set on the same transceiver.
         A transceiver passes when it matches any included category and no excluded one.
+        Untick a category to park it without losing it.
         \n\nNo categories means no filtering.</string>
     <string name="pass_satId" translatable="false">%05d</string>
     <string name="pass_elevation">Elevation: %.1f°</string>
@@ -87,6 +88,15 @@
     <string name="amsat_tlm">TLM/Beacon</string>
     <string name="amsat_not_heard">Not Heard</string>
     <string name="amsat_conflict">Conflicting</string>
+    <string name="amsat_sort">Sort</string>
+    <string name="amsat_sort_name">Name</string>
+    <string name="amsat_sort_recent">Last heard</string>
+    <string name="amsat_sort_best">Best heard</string>
+    <string name="amsat_sort_best_detail">%1$d%% heard \u00b7 %2$d reports</string>
+    <string name="amsat_sort_recent_detail">last report %1$dh ago</string>
+    <string name="amsat_sort_recent_now">reported this hour</string>
+    <string name="amsat_sort_no_reports">no reports</string>
+    <string name="amsat_sort_window_note">Ranked over the ~33h AMSAT returns (API caps at 500 reports)</string>
     <string name="amsat_name">Name</string>
     <string name="amsat_load_failed">Load failed - check network and retry</string>
     <string name="amsat_no_reports">No reports for this period</string>

@@ -76,7 +76,7 @@ class LocalSource(private val look4SatDao: Look4SatDao) : ILocalSource {
     }
 
     override suspend fun getIdsMatchingCategories(categories: List<FilterCategory>): List<Int> {
-        val active = categories.filterNot { it.isEmpty }
+        val active = categories.filter { it.isActive }
         if (active.isEmpty()) return emptyList()
         return catnumsMatching { radio ->
             matchesFilterCategories(
