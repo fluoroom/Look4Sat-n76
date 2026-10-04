@@ -70,12 +70,20 @@
         \n\nPlease update the database at least weekly to get accurate predictions.</string>
     <string name="pass_whatsnew_title" translatable="false">What\'s new in Look4Sat</string>
     <string name="pass_whatsnew_message" translatable="false">
-        * Fixed AOS window filter to follow the UTC setting by wty2019wty (#252)
-        \n\n* Applied elevation color thresholds to the Radar by atsunatsu (#253)
+        * Transceiver filter is now built from include/exclude categories. Each category
+        pins a mode set to a band set, so "FM on V only" for SSTV and "FM on V/U" for
+        repeaters can coexist without dragging telemetry in. Categories can be switched
+        off without losing them.
+        \n\n* AMSAT status list can be sorted by name, last heard or best heard.
+        \n\nMerged from upstream 4.4.7 and 4.4.8:
+        \n\n* Overhauled data sources with drag-and-drop reordering
+        \n\n* Added AMSAT status report submission
         \n\n* Added fuzzy satellite search ignoring separators by atsunatsu (#255)
         \n\n* Added light theme suitable for e-ink devices by Ondrej Kolonicny (#256)
+        \n\n* Applied elevation color thresholds to the Radar by atsunatsu (#253)
+        \n\n* Fixed AOS window filter to follow the UTC setting by wty2019wty (#252)
         \n\n* Fixed IC-705 frequency read in dual-radio mode by Michael S (#260)
-        \n\n* Fixed day/night map overlay calculation and display issue by rt-bishop
+        \n\n* Fixed day/night map overlay calculation and display by rt-bishop
     </string>
 
     <!-- AMSAT Status screen -->
