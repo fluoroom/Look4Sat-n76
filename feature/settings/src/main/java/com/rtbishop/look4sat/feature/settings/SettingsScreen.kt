@@ -193,10 +193,7 @@ private fun SettingsScreen(uiState: SettingsState, onAction: (SettingsAction) ->
 
     // URLs for top bar
     val uriHandler = LocalUriHandler.current
-//    val appUrl = stringResource(R.string.prefs_app_url)
     val donateUrl = stringResource(R.string.prefs_donate_url)
-    val fdroidTitle = stringResource(R.string.prefs_fdroid_title)
-    val fdroidUrl = stringResource(R.string.prefs_fdroid_url)
     val gitHubTitle = stringResource(R.string.prefs_github_title)
     val gitHubUrl = stringResource(R.string.prefs_github_url)
     val licenseUrl = stringResource(R.string.prefs_license_url)
@@ -219,12 +216,6 @@ private fun SettingsScreen(uiState: SettingsState, onAction: (SettingsAction) ->
                 TopBar {
                     Row(modifier = Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         BotCard(
-                            onClick = { safeOpenUri(fdroidUrl) },
-                            resId = R.drawable.ic_fdroid,
-                            text = fdroidTitle,
-                            modifier = Modifier.weight(1f)
-                        )
-                        BotCard(
                             onClick = { safeOpenUri(gitHubUrl) },
                             resId = R.drawable.ic_github,
                             text = gitHubTitle,
@@ -243,12 +234,6 @@ private fun SettingsScreen(uiState: SettingsState, onAction: (SettingsAction) ->
                         modifier = Modifier.weight(1f)
                     )
                     Row(modifier = Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        BotCard(
-                            onClick = { safeOpenUri(fdroidUrl) },
-                            resId = R.drawable.ic_fdroid,
-                            text = fdroidTitle,
-                            modifier = Modifier.weight(1f)
-                        )
                         BotCard(
                             onClick = { safeOpenUri(gitHubUrl) },
                             resId = R.drawable.ic_github,

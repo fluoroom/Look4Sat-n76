@@ -1,3 +1,4 @@
+* Renamed the N76 radio model to "VGC N76"; an existing N76 selection carries over.
 * Transceiver filter rebuilt as include/exclude categories: pin a mode set to a
   band set per category, so "FM on V only" (SSTV) and "FM on V/U" (repeaters)
   can coexist without pulling in telemetry. Categories can be switched off

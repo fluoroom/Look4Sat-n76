@@ -70,7 +70,8 @@
         \n\nPlease update the database at least weekly to get accurate predictions.</string>
     <string name="pass_whatsnew_title" translatable="false">What\'s new in Look4Sat</string>
     <string name="pass_whatsnew_message" translatable="false">
-        * Transceiver filter is now built from include/exclude categories. Each category
+        * The N76 radio model is now listed as "VGC N76"; an existing N76 selection carries over.
+        \n\n* Transceiver filter is now built from include/exclude categories. Each category
         pins a mode set to a band set, so "FM on V only" for SSTV and "FM on V/U" for
         repeaters can coexist without dragging telemetry in. Categories can be switched
         off without losing them.
@@ -201,13 +202,10 @@
 
     <!-- Settings screen -->
     <string name="prefs_app_title" translatable="false">Look4Sat v%s</string>
-    <string name="prefs_app_url" translatable="false">https://play.google.com/store/apps/details?id=com.rtbishop.look4sat</string>
     <string name="prefs_donate_title">Donate</string>
     <string name="prefs_donate_url" translatable="false">https://ko-fi.com/rt_bishop</string>
-    <string name="prefs_fdroid_title" translatable="false">F-Droid</string>
-    <string name="prefs_fdroid_url" translatable="false">https://f-droid.org/en/packages/com.rtbishop.look4sat/</string>
     <string name="prefs_github_title" translatable="false">GitHub</string>
-    <string name="prefs_github_url" translatable="false">https://github.com/rt-bishop/Look4Sat/</string>
+    <string name="prefs_github_url" translatable="false">https://github.com/fluoroom/Look4Sat-n76/</string>
     <string name="prefs_license_title" translatable="false">GPLv3</string>
     <string name="prefs_license_url" translatable="false">https://www.gnu.org/licenses/gpl-3.0.html</string>
     <string name="prefs_privacy_title">Privacy Policy</string>

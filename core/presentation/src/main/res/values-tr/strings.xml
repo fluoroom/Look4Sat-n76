@@ -108,13 +108,10 @@
 
     <!-- Settings screen -->
     <string name="prefs_app_title" translatable="false">Look4Sat v%s</string>
-    <string name="prefs_app_url" translatable="false">https://play.google.com/store/apps/details?id=com.rtbishop.look4sat</string>
     <string name="prefs_donate_title">Bağış yap</string>
     <string name="prefs_donate_url" translatable="false">https://ko-fi.com/rt_bishop</string>
-    <string name="prefs_fdroid_title" translatable="false">F-Droid</string>
-    <string name="prefs_fdroid_url" translatable="false">https://f-droid.org/en/packages/com.rtbishop.look4sat/</string>
     <string name="prefs_github_title" translatable="false">GitHub</string>
-    <string name="prefs_github_url" translatable="false">https://github.com/rt-bishop/Look4Sat/</string>
+    <string name="prefs_github_url" translatable="false">https://github.com/fluoroom/Look4Sat-n76/</string>
     <string name="prefs_license_title" translatable="false">GPLv3</string>
     <string name="prefs_license_url" translatable="false">https://www.gnu.org/licenses/gpl-3.0.html</string>
     <string name="prefs_privacy_title">Gizlilik Politikası</string>
