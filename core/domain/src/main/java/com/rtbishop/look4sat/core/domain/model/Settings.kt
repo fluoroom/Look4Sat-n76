@@ -140,7 +140,10 @@ data class RadioControlSettings(
         const val MODEL_YAESU_FT817   = "Yaesu FT-817/818"
         const val MODEL_YAESU_FT857   = "Yaesu FT-857/897"
         const val MODEL_ICOM_IC705    = "Icom IC-705"
-        const val MODEL_N76           = "HYS N76"
+        const val MODEL_N76           = "VGC N76"
+
+        /** Label used for the N76 before it was identified as a VGC; still in stored settings. */
+        const val LEGACY_MODEL_N76    = "HYS N76"
 
         val SUPPORTED_RADIOS = listOf(
             MODEL_YAESU_FT817, MODEL_YAESU_FT857, MODEL_ICOM_IC705, MODEL_N76
@@ -150,5 +153,17 @@ data class RadioControlSettings(
         val BAUD_RATES_YAESU = listOf(4800, 9600, 38400)
         /** Baud rates available for Icom IC-705 (higher speeds supported via CI-V USB/BT). */
         val BAUD_RATES_ICOM  = listOf(4800, 9600, 19200, 38400, 57600, 115200)
+
+        /**
+         * Maps a stored radio model onto the current label set. The N76 was labelled
+         * [LEGACY_MODEL_N76] until it was identified as a VGC, and that is the string sitting
+         * in existing installs' preferences. Normalizing on read keeps their radio selected,
+         * instead of falling through to a Yaesu and silently switching N76 control off.
+         */
+        fun normalizeModel(stored: String?): String = when {
+            stored.isNullOrBlank() -> MODEL_YAESU_FT817
+            stored == LEGACY_MODEL_N76 -> MODEL_N76
+            else -> stored
+        }
     }
 }

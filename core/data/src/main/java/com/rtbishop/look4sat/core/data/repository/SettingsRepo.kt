@@ -518,7 +518,7 @@ class SettingsRepo(
 
     private fun getRadioControlSettings(): RadioControlSettings = RadioControlSettings(
         enabled = preferences.getBoolean(keyRadioControlEnabled, false),
-        radioModel = preferences.getString(keyRadioModel, null) ?: RadioControlSettings.MODEL_YAESU_FT817,
+        radioModel = RadioControlSettings.normalizeModel(preferences.getString(keyRadioModel, null)),
         txRadioAddress = preferences.getString(keyTxRadioAddress, null) ?: "",
         rxRadioAddress = preferences.getString(keyRxRadioAddress, null) ?: "",
         txRadioName = preferences.getString(keyTxRadioName, null) ?: "TX Radio",
