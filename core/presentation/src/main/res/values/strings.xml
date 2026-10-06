@@ -83,6 +83,9 @@
         on/off switch, device picker and options. CAT now lists only the radios that speak CAT.
         An existing N76 setup carries over, and its controls appear on the tracking screen only
         while the switch is on.
+        \n\nMerged from upstream:
+        \n\n* Every pass row now carries its own AOS/LOS timer and progress bar
+        \n\n* Added a search filter over the pass list
     </string>
 
     <!-- AMSAT Status screen -->
