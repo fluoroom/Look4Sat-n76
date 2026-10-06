@@ -26,8 +26,7 @@ data class PassesState(
     val isRefreshing: Boolean = true,
     val isUtc: Boolean = false,
     val nextPass: OrbitalPass,
-    val nextTime: String = "00:00:00",
-    val isNextTimeAos: Boolean = true,
+    val searchQuery: String = "",
     val hours: Int = 24,
     val elevation: Double = 16.0,
     val lowElevation: Double = 16.0,
@@ -41,8 +40,7 @@ data class PassesState(
     val itemsList: List<OrbitalPass> = emptyList(),
     val groupedPasses: Map<String, List<OrbitalPass>> = emptyMap(),
     val shouldSeeWhatsNew: Boolean = false,
-    val sunTimes: Map<String, Pair<String, String>> = emptyMap(),
-    val focusedCatNum: Int? = null
+    val sunTimes: Map<String, Pair<String, String>> = emptyMap()
 )
 
 sealed interface PassesAction {
@@ -61,6 +59,5 @@ sealed interface PassesAction {
     data object RefreshPasses : PassesAction
     data object TogglePassesDialog : PassesAction
     data object ToggleTransponderDialog : PassesAction
-    data class FocusCatNum(val catNum: Int) : PassesAction
-    data object ClearFocus : PassesAction
+    data class SearchFor(val query: String) : PassesAction
 }

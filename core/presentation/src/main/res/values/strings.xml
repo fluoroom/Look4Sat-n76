@@ -61,8 +61,13 @@
     <string name="pass_deep_space" translatable="false">DeepSpace</string>
     <string name="pass_altitude">Altitude: %d km</string>
     <string name="pass_aosLos" translatable="false">%03d° - %03d°</string>
+    <string name="pass_azimuth" translatable="false">%03d°</string>
+    <string name="pass_duration_placeholder" translatable="false">--m --s</string>
+    <string name="pass_timer_aos" translatable="false">AOS %s</string>
+    <string name="pass_timer_los" translatable="false">LOS %s</string>
     <string name="pass_empty_list_message">
         Make sure your filters are correct and you have selected satellites</string>
+    <string name="pass_empty_search_message">No upcoming passes match your search</string>
     <string name="pass_error_message">There are no upcoming satellite passes to display</string>
     <string name="pass_welcome_title">Welcome to Look4Sat\!</string>
     <string name="pass_welcome_message">
@@ -104,7 +109,6 @@
     <string name="amsat_no_reports">No reports for this period</string>
     <string name="amsat_filter_empty">No satellites match the selected status</string>
     <string name="amsat_filter">AMSAT status</string>
-    <string name="amsat_filter_none">Any</string>
     <string name="sat_filter_amsat_hint">AMSAT: %s</string>
     <string name="amsat_close">Close</string>
     <string name="amsat_status_heard">Heard</string>
