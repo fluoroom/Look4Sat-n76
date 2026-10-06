@@ -25,6 +25,7 @@ import com.rtbishop.look4sat.core.domain.model.RCSettings
 import com.rtbishop.look4sat.core.domain.model.N76Settings
 import com.rtbishop.look4sat.core.domain.model.RadioControlSettings
 import com.rtbishop.look4sat.core.domain.predict.GeoPos
+import com.rtbishop.look4sat.core.domain.utility.SatStatusCategory
 import kotlinx.coroutines.flow.StateFlow
 
 interface ISettingsRepo {
@@ -35,8 +36,11 @@ interface ISettingsRepo {
     //region # Satellites selection settings
     val selectedIds: StateFlow<List<Int>>
     val selectedSatModes: StateFlow<List<String>>
+    /** AMSAT report kinds a satellite must have at least one of. Empty = no AMSAT filter. */
+    val selectedAmSatStatuses: StateFlow<Set<SatStatusCategory>>
     fun setSelectedIds(ids: List<Int>)
     fun setSelectedSatModes(modes: List<String>)
+    fun setSelectedAmSatStatuses(statuses: Set<SatStatusCategory>)
     //endregion
 
     //region # Passes filter settings

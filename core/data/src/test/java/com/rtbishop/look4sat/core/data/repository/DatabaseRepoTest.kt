@@ -30,6 +30,7 @@ import com.rtbishop.look4sat.core.domain.predict.GeoPos
 import com.rtbishop.look4sat.core.domain.predict.OrbitalData
 import com.rtbishop.look4sat.core.domain.predict.OrbitalObject
 import com.rtbishop.look4sat.core.domain.repository.ISettingsRepo
+import com.rtbishop.look4sat.core.domain.utility.SatStatusCategory
 import com.rtbishop.look4sat.core.domain.model.FilterCategory
 import com.rtbishop.look4sat.core.domain.source.ILocalSource
 import com.rtbishop.look4sat.core.domain.source.IRemoteSource
@@ -368,6 +369,8 @@ private class FakeSettingsRepo(dataSources: DataSourcesSettings = defaultDataSou
 
     override val selectedSatModes: StateFlow<List<String>> = MutableStateFlow(emptyList())
 
+    override val selectedAmSatStatuses: StateFlow<Set<SatStatusCategory>> = MutableStateFlow(emptySet())
+
     override val passesSettings: StateFlow<PassesSettings> = MutableStateFlow(
         PassesSettings(hoursAhead = 24, minElevation = 0.0)
     )
@@ -397,6 +400,8 @@ private class FakeSettingsRepo(dataSources: DataSourcesSettings = defaultDataSou
     override fun setSelectedIds(ids: List<Int>) = Unit
 
     override fun setSelectedSatModes(modes: List<String>) = Unit
+
+    override fun setSelectedAmSatStatuses(statuses: Set<SatStatusCategory>) = Unit
 
     override fun setPassesSettings(settings: PassesSettings) = Unit
 

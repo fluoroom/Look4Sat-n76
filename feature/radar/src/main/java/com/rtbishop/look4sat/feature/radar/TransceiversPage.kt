@@ -496,7 +496,7 @@ private fun ExpandedRadioControl(
 @Composable
 private fun N76DebugPanel(n76: N76RuntimeState, onAction: (RadarAction) -> Unit) {
     Text(
-        text = "N76 debug",
+        text = "N76",
         fontWeight = FontWeight.Medium,
         color = MaterialTheme.colorScheme.primary,
         fontSize = 13.sp

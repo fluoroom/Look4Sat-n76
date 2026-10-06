@@ -24,6 +24,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.rtbishop.look4sat.core.domain.repository.IMainContainer
 import com.rtbishop.look4sat.core.domain.repository.ISelectionRepo
 import com.rtbishop.look4sat.core.domain.repository.ISettingsRepo
+import com.rtbishop.look4sat.core.domain.utility.SatStatusCategory
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
@@ -41,7 +42,8 @@ class SatellitesViewModel(
             isLoading = true,
             shouldSeeWarning = settingsRepo.otherSettings.value.shouldSeeWarning,
             currentModes = defaultModes,
-            modesList = selectionRepo.getModesList()
+            modesList = selectionRepo.getModesList(),
+            currentAmSatStatuses = selectionRepo.getCurrentAmSatStatuses()
         )
     )
     val uiState: StateFlow<SatellitesState> = _uiState
@@ -64,6 +66,11 @@ class SatellitesViewModel(
                 _uiState.update { it.copy(currentModes = modes) }
             }
         }
+        viewModelScope.launch {
+            settingsRepo.selectedAmSatStatuses.collectLatest { statuses ->
+                _uiState.update { it.copy(currentAmSatStatuses = statuses) }
+            }
+        }
     }
 
     fun onAction(action: SatellitesAction) {
@@ -73,8 +80,8 @@ class SatellitesViewModel(
             is SatellitesAction.SearchFor -> searchFor(action.query)
             SatellitesAction.SelectAll -> selectAll(true)
             is SatellitesAction.SelectSingle -> selectSingle(action.id, action.isTicked)
-            is SatellitesAction.SelectModes -> selectModes(action.modes)
-            SatellitesAction.ToggleModesDialog -> toggleModesDialog()
+            is SatellitesAction.SelectFilters -> selectFilters(action.modes, action.amSatStatuses)
+            SatellitesAction.ToggleFilterDialog -> toggleFilterDialog()
             SatellitesAction.UnselectAll -> selectAll(false)
         }
     }
@@ -91,12 +98,18 @@ class SatellitesViewModel(
         selectionRepo.setSelection(listOf(id), isTicked.not())
     }
 
-    private fun selectModes(modes: List<String>) = viewModelScope.launch {
+    private fun selectFilters(
+        modes: List<String>,
+        amSatStatuses: Set<SatStatusCategory>
+    ) = viewModelScope.launch {
         selectionRepo.setModes(modes)
-        _uiState.update { it.copy(currentModes = modes, isDialogShown = false) }
+        selectionRepo.setAmSatStatuses(amSatStatuses)
+        _uiState.update {
+            it.copy(currentModes = modes, currentAmSatStatuses = amSatStatuses, isDialogShown = false)
+        }
     }
 
-    private fun toggleModesDialog() {
+    private fun toggleFilterDialog() {
         _uiState.update { it.copy(isDialogShown = !it.isDialogShown) }
     }
 

@@ -18,13 +18,16 @@
 package com.rtbishop.look4sat.core.domain.repository
 
 import com.rtbishop.look4sat.core.domain.model.SatItem
+import com.rtbishop.look4sat.core.domain.utility.SatStatusCategory
 import kotlinx.coroutines.flow.Flow
 
 interface ISelectionRepo {
     fun getCurrentModes(): List<String>
     fun getModesList(): List<String>
+    fun getCurrentAmSatStatuses(): Set<SatStatusCategory>
     suspend fun getEntriesFlow(): Flow<List<SatItem>>
     suspend fun setModes(modes: List<String>)
+    suspend fun setAmSatStatuses(statuses: Set<SatStatusCategory>)
     suspend fun setQuery(query: String)
     suspend fun setSelection(selectAll: Boolean)
     suspend fun setSelection(ids: List<Int>, isTicked: Boolean)

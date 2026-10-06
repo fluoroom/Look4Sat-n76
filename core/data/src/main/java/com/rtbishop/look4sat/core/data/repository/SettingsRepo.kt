@@ -38,6 +38,7 @@ import com.rtbishop.look4sat.core.domain.model.Constants
 import com.rtbishop.look4sat.core.domain.predict.GeoPos
 import com.rtbishop.look4sat.core.domain.repository.ISettingsRepo
 import com.rtbishop.look4sat.core.domain.source.Sources
+import com.rtbishop.look4sat.core.domain.utility.SatStatusCategory
 import com.rtbishop.look4sat.core.domain.utility.positionToQth
 import com.rtbishop.look4sat.core.domain.utility.qthToPosition
 import com.rtbishop.look4sat.core.domain.utility.round
@@ -80,6 +81,7 @@ class SettingsRepo(
     private val keyFrequencyOffsetHz = "frequencyOffsetHz"
     private val keySelectedIds = "selectedIds"
     private val keySelectedSatModes = "selectedSatModes"
+    private val keySelectedAmSatStatuses = "selectedAmSatStatuses"
     private val keyLegacySelectedModes = "selectedModes"
     private val keySelectedBands = "selectedBands"
     private val keyFilterCategories = "filterCategories"
@@ -129,6 +131,8 @@ class SettingsRepo(
     private val _satelliteModeSelection = MutableStateFlow(getSelectedSatModes())
     override val selectedIds: StateFlow<List<Int>> = _satelliteSelection
     override val selectedSatModes: StateFlow<List<String>> = _satelliteModeSelection
+    private val _amSatStatusSelection = MutableStateFlow(getSelectedAmSatStatuses())
+    override val selectedAmSatStatuses: StateFlow<Set<SatStatusCategory>> = _amSatStatusSelection
 
     override fun setSelectedIds(ids: List<Int>) {
         val selectionString = ids.joinToString(separatorComma)
@@ -141,6 +145,21 @@ class SettingsRepo(
         val modesString = cleaned.joinToString(separatorComma)
         preferences.edit { putString(keySelectedSatModes, modesString) }
         _satelliteModeSelection.value = cleaned
+    }
+
+    override fun setSelectedAmSatStatuses(statuses: Set<SatStatusCategory>) {
+        val statusString = statuses.joinToString(separatorComma) { it.name }
+        preferences.edit { putString(keySelectedAmSatStatuses, statusString) }
+        _amSatStatusSelection.value = statuses
+    }
+
+    /** Unknown names are dropped, so a renamed category degrades to "not selected". */
+    private fun getSelectedAmSatStatuses(): Set<SatStatusCategory> {
+        val statusString = preferences.getString(keySelectedAmSatStatuses, null)
+        if (statusString.isNullOrEmpty()) return emptySet()
+        return statusString.split(separatorComma)
+            .mapNotNull { name -> SatStatusCategory.entries.firstOrNull { it.name == name } }
+            .toSet()
     }
 
     private fun getSelectedIds(): List<Int> {
@@ -527,6 +546,9 @@ class SettingsRepo(
         splitMode = preferences.getBoolean(keyRadioSplitMode, false)
     )
 
+    private val keyN76Enabled = "n76Enabled"
+    private val keyN76DeviceAddress = "n76DeviceAddress"
+    private val keyN76DeviceName = "n76DeviceName"
     private val keyN76SendSatInfo = "n76SendSatInfo"
     private val keyN76SatFirmware = "n76SatFirmware"
     private val keyN76PollMs = "n76PollMs"
@@ -547,6 +569,9 @@ class SettingsRepo(
 
     override fun updateN76Settings(settings: N76Settings) {
         preferences.edit {
+            putBoolean(keyN76Enabled, settings.enabled)
+            putString(keyN76DeviceAddress, settings.deviceAddress)
+            putString(keyN76DeviceName, settings.deviceName)
             putBoolean(keyN76SendSatInfo, settings.sendSatInfo)
             putBoolean(keyN76SatFirmware, settings.satFirmware)
             putLong(keyN76PollMs, settings.pollIntervalMs)
@@ -565,23 +590,37 @@ class SettingsRepo(
         _n76Settings.value = settings
     }
 
-    private fun getN76Settings(): N76Settings = N76Settings(
-        sendSatInfo = preferences.getBoolean(keyN76SendSatInfo, true),
-        satFirmware = preferences.getBoolean(keyN76SatFirmware, true),
-        pollIntervalMs = preferences.getLong(keyN76PollMs, 500L)
-            .coerceIn(N76Settings.POLL_MIN_MS, N76Settings.POLL_MAX_MS),
-        forceRxCtcss = preferences.getBoolean(keyN76ForceRx, false),
-        forceRxCtcssHzx100 = preferences.getInt(keyN76ForceRxTone, 0),
-        forceTxCtcss = preferences.getBoolean(keyN76ForceTx, false),
-        forceTxCtcssHzx100 = preferences.getInt(keyN76ForceTxTone, 0),
-        audioRfcomm = preferences.getBoolean(keyN76AudioRfcomm, false),
-        speakerMonitor = preferences.getBoolean(keyN76Monitor, false),
-        recordHt = preferences.getBoolean(keyN76RecordHt, false),
-        recordMic = preferences.getBoolean(keyN76RecordMic, false),
-        recordSatOnly = preferences.getBoolean(keyN76RecordSatOnly, false),
-        outputFolderUri = preferences.getString(keyN76OutputFolder, null) ?: "",
-        inputDeviceId = preferences.getInt(keyN76InputDeviceId, 0)
-    )
+    /**
+     * Reads the N76 options, migrating installs that configured it as a CAT radio model. Those
+     * have no `n76Enabled` key but do have "VGC N76"/"HYS N76" stored as the radio model, with
+     * the handheld's MAC in the CAT TX address — so the flag and the device are taken from there
+     * once, and written back on the next save.
+     */
+    private fun getN76Settings(): N76Settings {
+        val storedAsCatModel = RadioControlSettings.isN76Model(preferences.getString(keyRadioModel, null))
+        return N76Settings(
+            enabled = preferences.getBoolean(keyN76Enabled, storedAsCatModel),
+            deviceAddress = preferences.getString(keyN76DeviceAddress, null)
+                ?: if (storedAsCatModel) preferences.getString(keyTxRadioAddress, null).orEmpty() else "",
+            deviceName = preferences.getString(keyN76DeviceName, null)
+                ?: if (storedAsCatModel) preferences.getString(keyTxRadioName, null).orEmpty() else "",
+            sendSatInfo = preferences.getBoolean(keyN76SendSatInfo, true),
+            satFirmware = preferences.getBoolean(keyN76SatFirmware, true),
+            pollIntervalMs = preferences.getLong(keyN76PollMs, 500L)
+                .coerceIn(N76Settings.POLL_MIN_MS, N76Settings.POLL_MAX_MS),
+            forceRxCtcss = preferences.getBoolean(keyN76ForceRx, false),
+            forceRxCtcssHzx100 = preferences.getInt(keyN76ForceRxTone, 0),
+            forceTxCtcss = preferences.getBoolean(keyN76ForceTx, false),
+            forceTxCtcssHzx100 = preferences.getInt(keyN76ForceTxTone, 0),
+            audioRfcomm = preferences.getBoolean(keyN76AudioRfcomm, false),
+            speakerMonitor = preferences.getBoolean(keyN76Monitor, false),
+            recordHt = preferences.getBoolean(keyN76RecordHt, false),
+            recordMic = preferences.getBoolean(keyN76RecordMic, false),
+            recordSatOnly = preferences.getBoolean(keyN76RecordSatOnly, false),
+            outputFolderUri = preferences.getString(keyN76OutputFolder, null) ?: "",
+            inputDeviceId = preferences.getInt(keyN76InputDeviceId, 0)
+        )
+    }
 
     private val keySatelliteOffsets = "satelliteOffsets"
 

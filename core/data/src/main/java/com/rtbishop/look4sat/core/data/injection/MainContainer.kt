@@ -74,10 +74,12 @@ class MainContainer(private val context: Context) : IMainContainer {
     private val mainHandler = CoroutineExceptionHandler { _, error -> println("MainHandler: $error") }
     override val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + mainHandler)
     override val settingsRepo = provideSettingsRepo()
+    // Declared before selectionRepo, which takes it: initializers run in declaration order, and a
+    // lazy delegate read before its own field is set throws.
+    override val amSatRepo by lazy { AmSatRepository(remoteSource) }
     override val selectionRepo = provideSelectionRepo()
     override val satelliteRepo = provideSatelliteRepo()
     override val databaseRepo = provideDatabaseRepo()
-    override val amSatRepo by lazy { AmSatRepository(remoteSource) }
     override val radioTrackingService: IRadioTrackingService by lazy {
         val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         RadioTrackingService(appScope, manager, satelliteRepo, settingsRepo, context)
@@ -186,7 +188,7 @@ class MainContainer(private val context: Context) : IMainContainer {
     }
 
     private fun provideSelectionRepo(): ISelectionRepo {
-        return SelectionRepo(Dispatchers.Default, localSource, settingsRepo)
+        return SelectionRepo(Dispatchers.Default, localSource, settingsRepo, amSatRepo)
     }
 
     private fun provideSettingsRepo(): ISettingsRepo {

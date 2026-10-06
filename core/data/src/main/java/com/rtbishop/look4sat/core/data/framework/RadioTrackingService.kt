@@ -60,7 +60,7 @@ class RadioTrackingService(
 
     private val _n76State = MutableStateFlow(
         N76RuntimeState(
-            isN76 = settingsRepo.radioControlSettings.value.radioModel == RadioControlSettings.MODEL_N76,
+            isN76 = settingsRepo.n76Settings.value.enabled,
             monitorOn = settingsRepo.n76Settings.value.speakerMonitor,
             autoRecord = settingsRepo.n76Settings.value.recordSatOnly
         )
@@ -92,34 +92,37 @@ class RadioTrackingService(
         n76SatActive = false
 
         val rcSettings = settingsRepo.radioControlSettings.value
+        val n76Settings = settingsRepo.n76Settings.value
         val txAddr     = rcSettings.txRadioAddress
         val rxAddr     = rcSettings.rxRadioAddress
-        val isN76      = rcSettings.radioModel == RadioControlSettings.MODEL_N76
+        // The N76 is its own Bluetooth link rather than a CAT model, and takes precedence when on.
+        val isN76      = n76Settings.enabled
         val isIcom     = rcSettings.radioModel == RadioControlSettings.MODEL_ICOM_IC705
         val isSplit    = isIcom && rcSettings.splitMode
         _n76State.update {
             it.copy(
                 isN76 = isN76,
-                monitorOn = settingsRepo.n76Settings.value.speakerMonitor,
-                autoRecord = settingsRepo.n76Settings.value.recordSatOnly,
+                monitorOn = n76Settings.speakerMonitor,
+                autoRecord = n76Settings.recordSatOnly,
                 logs = emptyList()
             )
         }
 
-        Log.i(tag, "connectRadios model=${rcSettings.radioModel} split=$isSplit TX=$txAddr RX=$rxAddr")
+        Log.i(tag, "connectRadios model=${rcSettings.radioModel} n76=$isN76 split=$isSplit TX=$txAddr RX=$rxAddr")
 
         if (isN76) {
-            if (txAddr.isBlank() || !BluetoothAddress.isValid(txAddr)) {
+            val n76Addr = n76Settings.deviceAddress
+            if (n76Addr.isBlank() || !BluetoothAddress.isValid(n76Addr)) {
                 _state.update { it.copy(errorMessage = "Set a valid N76 MAC in Settings (type or scan)") }
                 return
             }
             _state.update { it.copy(errorMessage = null) }
-            val ok = n76Link.connect(txAddr, settingsRepo.n76Settings.value)
+            val ok = n76Link.connect(n76Addr, n76Settings)
             _state.update {
                 it.copy(
                     txConnected = ok,
                     rxConnected = ok,
-                    errorMessage = if (!ok) "Could not connect to N76 ($txAddr)" else null
+                    errorMessage = if (!ok) "Could not connect to N76 ($n76Addr)" else null
                 )
             }
             return
@@ -202,7 +205,7 @@ class RadioTrackingService(
         trackingJob?.cancel()
 
         val rcSettings = settingsRepo.radioControlSettings.value
-        val isN76      = rcSettings.radioModel == RadioControlSettings.MODEL_N76
+        val isN76      = settingsRepo.n76Settings.value.enabled
         val isIcom     = rcSettings.radioModel == RadioControlSettings.MODEL_ICOM_IC705
         val isSplit    = isIcom && rcSettings.splitMode
 
@@ -622,7 +625,7 @@ class RadioTrackingService(
     }
 
     override fun setPtt(on: Boolean) {
-        if (settingsRepo.radioControlSettings.value.radioModel == RadioControlSettings.MODEL_N76) {
+        if (settingsRepo.n76Settings.value.enabled) {
             n76Link.setPtt(on)
             return
         }

@@ -59,6 +59,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.rtbishop.look4sat.core.domain.model.SatItem
 import com.rtbishop.look4sat.core.domain.repository.IContainerProvider
+import com.rtbishop.look4sat.core.domain.utility.SatStatusCategory
 import com.rtbishop.look4sat.core.presentation.CardLoadingIndicator
 import com.rtbishop.look4sat.core.presentation.EmptyListCard
 import com.rtbishop.look4sat.core.presentation.IconCard
@@ -88,11 +89,12 @@ private fun SatellitesScreen(
     navigateUp: () -> Unit
 ) {
     if (uiState.isDialogShown) {
-        MultiModesDialog(
+        SatellitesFilterDialog(
             allModes = uiState.modesList,
             modes = uiState.currentModes,
-            cancel = { onAction(SatellitesAction.ToggleModesDialog) },
-            accept = { onAction(SatellitesAction.SelectModes(it)) }
+            amSatStatuses = uiState.currentAmSatStatuses,
+            cancel = { onAction(SatellitesAction.ToggleFilterDialog) },
+            accept = { modes, statuses -> onAction(SatellitesAction.SelectFilters(modes, statuses)) }
         )
     }
     if (uiState.shouldSeeWarning) {
@@ -123,9 +125,10 @@ private fun SatellitesScreen(
     Column(modifier = Modifier.layoutPadding(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (isVerticalLayout()) {
             TopBar {
-                ModeCard(
+                FilterCard(
                     modes = uiState.currentModes,
-                    onClick = { onAction(SatellitesAction.ToggleModesDialog) },
+                    amSatStatuses = uiState.currentAmSatStatuses,
+                    onClick = { onAction(SatellitesAction.ToggleFilterDialog) },
                     modifier = Modifier.weight(1f)
                 )
                 PrimaryIconCard(
@@ -157,9 +160,10 @@ private fun SatellitesScreen(
                     resId = R.drawable.ic_done,
                     modifier = Modifier.semantics { contentDescription = primCardCd }
                 )
-                ModeCard(
+                FilterCard(
                     modes = uiState.currentModes,
-                    onClick = { onAction(SatellitesAction.ToggleModesDialog) },
+                    amSatStatuses = uiState.currentAmSatStatuses,
+                    onClick = { onAction(SatellitesAction.ToggleFilterDialog) },
                     modifier = Modifier.weight(1f)
                 )
                 SearchBar(
@@ -240,9 +244,27 @@ private fun SearchBar(onQueryChange: (String) -> Unit, modifier: Modifier = Modi
     }
 }
 
+/** Mode and AMSAT filter summary; the AMSAT half only shows up once it constrains something. */
 @Composable
-private fun ModeCard(modes: List<String>, onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun FilterCard(
+    modes: List<String>,
+    amSatStatuses: Set<SatStatusCategory>,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     val modesText = if (modes.isEmpty()) "All" else modes.joinToString(", ")
+    // Labels are read up front: stringResource cannot be called from joinToString's lambda.
+    val statusLabels = mapOf(
+        SatStatusCategory.Active to stringResource(R.string.amsat_active),
+        SatStatusCategory.TelemetryOnly to stringResource(R.string.amsat_tlm),
+        SatStatusCategory.NotHeard to stringResource(R.string.amsat_not_heard),
+        SatStatusCategory.Conflicting to stringResource(R.string.amsat_conflict)
+    )
+    val selectedLabels = SatStatusCategory.entries
+        .filter { it in amSatStatuses }
+        .joinToString(", ") { statusLabels.getValue(it) }
+    val amSatText = selectedLabels.takeIf { it.isNotEmpty() }
+        ?.let { stringResource(R.string.sat_filter_amsat_hint, it) }
     ElevatedCard(modifier = modifier) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -257,7 +279,8 @@ private fun ModeCard(modes: List<String>, onClick: () -> Unit, modifier: Modifie
                 tint = MaterialTheme.colorScheme.primary
             )
             Text(
-                text = stringResource(R.string.sat_type_hint, modesText),
+                text = listOfNotNull(stringResource(R.string.sat_type_hint, modesText), amSatText)
+                    .joinToString(" \u00b7 "),
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier

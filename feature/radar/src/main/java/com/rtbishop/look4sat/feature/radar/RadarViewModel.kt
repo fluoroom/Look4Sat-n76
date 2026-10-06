@@ -22,7 +22,6 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.rtbishop.look4sat.core.domain.model.AudioSource
-import com.rtbishop.look4sat.core.domain.model.RadioControlSettings
 import com.rtbishop.look4sat.core.domain.model.SatRadio
 import com.rtbishop.look4sat.core.domain.predict.CelestialComputer
 import com.rtbishop.look4sat.core.domain.predict.OrbitalObject
@@ -270,21 +269,24 @@ class RadarViewModel(
         viewModelScope.launch {
             trackingService.n76State.collect { n76 ->
                 _uiState.update {
-                    it.copy(n76 = n76.copy(autoRecord = settingsRepo.n76Settings.value.recordSatOnly))
+                    it.copy(
+                        n76 = n76.copy(
+                            isN76 = settingsRepo.n76Settings.value.enabled,
+                            autoRecord = settingsRepo.n76Settings.value.recordSatOnly
+                        )
+                    )
                 }
             }
         }
+        // The N76 panel follows its own settings switch, so switching the handheld off in
+        // settings takes its controls off the tracking screen as well.
         viewModelScope.launch {
             settingsRepo.n76Settings.collect { settings ->
-                _uiState.update { it.copy(n76 = it.n76.copy(autoRecord = settings.recordSatOnly)) }
-            }
-        }
-        viewModelScope.launch {
-            settingsRepo.radioControlSettings.collect { rc ->
                 _uiState.update {
                     it.copy(
                         n76 = it.n76.copy(
-                            isN76 = rc.radioModel == RadioControlSettings.MODEL_N76
+                            isN76 = settings.enabled,
+                            autoRecord = settings.recordSatOnly
                         )
                     )
                 }

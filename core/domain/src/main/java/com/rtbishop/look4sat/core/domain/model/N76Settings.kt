@@ -18,10 +18,18 @@
 package com.rtbishop.look4sat.core.domain.model
 
 /**
- * Debug-configurable N76 Bluetooth options. Every feature is independently bypassable.
- * Used only when [RadioControlSettings.radioModel] is [RadioControlSettings.MODEL_N76].
+ * The VGC N76 handheld: its Bluetooth link plus the debug-configurable options it accepts.
+ * Every feature is independently bypassable.
+ *
+ * The N76 talks its own Bluetooth protocol rather than CAT, so it carries its own [enabled] flag
+ * and its own [deviceAddress] instead of borrowing the CAT radio model and TX address. That keeps
+ * CAT to the radios that actually speak it, and lets the handheld be switched on and off without
+ * disturbing a configured CAT rig.
  */
 data class N76Settings(
+    val enabled: Boolean = false,
+    val deviceAddress: String = "",
+    val deviceName: String = "",
     val sendSatInfo: Boolean = true,
     val satFirmware: Boolean = true,
     val pollIntervalMs: Long = 500L,

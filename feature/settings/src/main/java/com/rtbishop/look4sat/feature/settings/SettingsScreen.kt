@@ -160,31 +160,23 @@ private fun SettingsScreen(uiState: SettingsState, onAction: (SettingsAction) ->
     if (dialogs.bluetooth) {
         BluetoothOutputDialog(
             initialSettings = uiState.rcSettings,
+            initialN76 = uiState.n76Settings,
+            pairedBluetoothDevices = uiState.pairedBluetoothDevices,
+            onRefreshPaired = { onAction(SettingsAction.RefreshPairedBluetooth) },
             onDismiss = { dialogs.bluetooth = false },
-            onSave = { rotState, rotAddr, rotFmt, freqState, freqAddr, freqFmt ->
-                onAction(
-                    SettingsAction.UpdateRC(
-                        uiState.rcSettings.copy(
-                            bluetoothRotatorState = rotState, bluetoothRotatorAddress = rotAddr,
-                            bluetoothRotatorFormat = rotFmt, bluetoothFrequencyState = freqState,
-                            bluetoothFrequencyAddress = freqAddr, bluetoothFrequencyFormat = freqFmt
-                        )
-                    )
-                )
+            onSave = { rc, n76 ->
+                onAction(SettingsAction.UpdateRC(rc))
+                onAction(SettingsAction.UpdateN76(n76))
             }
         )
     }
     if (dialogs.radioControl) {
         RadioControlDialog(
             initialSettings = uiState.radioControlSettings,
-            initialN76 = uiState.n76Settings,
             pairedBluetoothDevices = uiState.pairedBluetoothDevices,
             onRefreshPaired = { onAction(SettingsAction.RefreshPairedBluetooth) },
             onDismiss = { dialogs.radioControl = false },
-            onSave = { radio, n76 ->
-                onAction(SettingsAction.UpdateRadioControl(radio))
-                onAction(SettingsAction.UpdateN76(n76))
-            }
+            onSave = { radio -> onAction(SettingsAction.UpdateRadioControl(radio)) }
         )
     }
     if (dialogs.whatsNew) {

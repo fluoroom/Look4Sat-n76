@@ -3,6 +3,7 @@ package com.rtbishop.look4sat.feature.status
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -56,6 +57,7 @@ import com.rtbishop.look4sat.core.domain.model.SatDay
 import com.rtbishop.look4sat.core.domain.model.SatReport
 import com.rtbishop.look4sat.core.domain.model.SatSlot
 import com.rtbishop.look4sat.core.domain.model.SatStatus
+import com.rtbishop.look4sat.core.domain.utility.SatStatusCategory
 import com.rtbishop.look4sat.core.domain.utility.SatStatusRating
 import com.rtbishop.look4sat.core.domain.utility.SatStatusSort
 import com.rtbishop.look4sat.core.domain.repository.IContainerProvider
@@ -127,6 +129,7 @@ fun SatStatusDestination() {
         uiState = uiState,
         refresh = viewModel::refresh,
         onSortChange = viewModel::setSort,
+        onCategoryToggle = viewModel::toggleCategory,
         onToggleUpload = viewModel::toggleUploadPanel,
         onUploadReportChange = viewModel::setUploadReport,
         onUploadCallsignChange = viewModel::setUploadCallsign,
@@ -143,6 +146,7 @@ private fun SatStatusScreen(
     uiState: SatStatusUiState,
     refresh: () -> Unit,
     onSortChange: (SatStatusSort) -> Unit,
+    onCategoryToggle: (SatStatusCategory) -> Unit,
     onToggleUpload: () -> Unit,
     onUploadReportChange: (String) -> Unit,
     onUploadCallsignChange: (String) -> Unit,
@@ -155,7 +159,7 @@ private fun SatStatusScreen(
     var selectedDay by remember { mutableStateOf<Pair<SatStatus, SatDay>?>(null) }
     Column(modifier = Modifier.fillMaxSize().layoutPadding()) {
         StatusHeader(fetchedAtUtcMs = uiState.fetchedAtUtcMs, isRefreshing = uiState.isRefreshing, onRefresh = refresh)
-        LegendRow()
+        LegendRow(selected = uiState.categoryFilter, onToggle = onCategoryToggle)
         SortRow(selected = uiState.sort, onSelect = onSortChange)
 
         when {
@@ -172,6 +176,15 @@ private fun SatStatusScreen(
                 ) {
                     Text(text = stringResource(id = R.string.amsat_load_failed), color = MaterialTheme.colorScheme.error)
                     TextButton(onClick = refresh) { Text(text = stringResource(id = R.string.amsat_retry)) }
+                }
+            }
+            uiState.statuses.isEmpty() -> {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        text = stringResource(id = R.string.amsat_filter_empty),
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
             else -> {
@@ -250,26 +263,34 @@ private fun StatusHeader(fetchedAtUtcMs: Long, isRefreshing: Boolean, onRefresh:
     }
 }
 
-/** Legend: FlowRow of colored chips — wraps to two lines on narrow screens, stays one line when wide. */
+/**
+ * Legend and status filter in one row: each chip names a report kind and switches it in or out of
+ * the filter. A satellite is shown when it has at least one report of a selected kind, and an
+ * empty selection shows every satellite — so the row costs no vertical space the legend did not
+ * already take. Wraps to two lines on narrow screens, stays one line when wide.
+ */
 @Composable
-private fun LegendRow() {
+private fun LegendRow(selected: Set<SatStatusCategory>, onToggle: (SatStatusCategory) -> Unit) {
     val legend = listOf(
-        stringResource(id = R.string.amsat_active) to Color(0xFF648FFF),
-        stringResource(id = R.string.amsat_tlm) to Color(0xFFFFB000),
-        stringResource(id = R.string.amsat_not_heard) to Color(0xFFDC267F),
-        stringResource(id = R.string.amsat_conflict) to Color(0xFFFE6100)
+        Triple(SatStatusCategory.Active, stringResource(id = R.string.amsat_active), Color(0xFF648FFF)),
+        Triple(SatStatusCategory.TelemetryOnly, stringResource(id = R.string.amsat_tlm), Color(0xFFFFB000)),
+        Triple(SatStatusCategory.NotHeard, stringResource(id = R.string.amsat_not_heard), Color(0xFFDC267F)),
+        Triple(SatStatusCategory.Conflicting, stringResource(id = R.string.amsat_conflict), Color(0xFFFE6100))
     )
     FlowRow(
         modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        legend.forEach { (label, color) ->
-            val alphaColor = color.copy(alpha = 0.25f)
+        legend.forEach { (category, label, color) ->
+            val isOn = category in selected
+            val shape = RoundedCornerShape(32.dp)
             Row(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(32.dp))
-                    .background(alphaColor)
+                    .clip(shape)
+                    .background(color.copy(alpha = if (isOn) 0.55f else 0.25f))
+                    .then(if (isOn) Modifier.border(1.dp, color, shape) else Modifier)
+                    .clickable { onToggle(category) }
                     .padding(horizontal = 12.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -283,6 +304,7 @@ private fun LegendRow() {
                 Text(
                     text = label,
                     fontSize = 14.sp,
+                    fontWeight = if (isOn) FontWeight.SemiBold else FontWeight.Normal,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }

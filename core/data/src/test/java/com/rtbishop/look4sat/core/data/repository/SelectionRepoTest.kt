@@ -28,7 +28,12 @@ import com.rtbishop.look4sat.core.domain.model.SatItem
 import com.rtbishop.look4sat.core.domain.model.SatRadio
 import com.rtbishop.look4sat.core.domain.predict.GeoPos
 import com.rtbishop.look4sat.core.domain.predict.OrbitalObject
+import com.rtbishop.look4sat.core.domain.model.AmSatReportSubmission
+import com.rtbishop.look4sat.core.domain.model.AmSatReportSubmitResult
+import com.rtbishop.look4sat.core.domain.model.SatStatusPage
+import com.rtbishop.look4sat.core.domain.repository.IAmSatRepository
 import com.rtbishop.look4sat.core.domain.repository.ISettingsRepo
+import com.rtbishop.look4sat.core.domain.utility.SatStatusCategory
 import com.rtbishop.look4sat.core.domain.model.FilterCategory
 import com.rtbishop.look4sat.core.domain.source.ILocalSource
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -54,7 +59,7 @@ class SelectionRepoTest {
             )
         )
         val settingsRepo = FakeSettingsRepo(selectedModes = listOf("REMOVED_MODE"))
-        val repository = SelectionRepo(dispatcher, localSource, settingsRepo)
+        val repository = SelectionRepo(dispatcher, localSource, settingsRepo, FakeAmSatRepo())
 
         val flow = repository.getEntriesFlow()
         repository.setModes(listOf("REMOVED_MODE"))
@@ -75,7 +80,7 @@ class SelectionRepoTest {
             )
         )
         val settingsRepo = FakeSettingsRepo(selectedModes = emptyList())
-        val repository = SelectionRepo(dispatcher, localSource, settingsRepo)
+        val repository = SelectionRepo(dispatcher, localSource, settingsRepo, FakeAmSatRepo())
 
         val flow = repository.getEntriesFlow()
         repository.setSelection(listOf(40967), true)
@@ -142,7 +147,15 @@ class SelectionRepoTest {
                 SatItem(99999, "FO-29", false)
             )
         )
-        return SelectionRepo(dispatcher, localSource, FakeSettingsRepo(selectedModes = emptyList()))
+        return SelectionRepo(dispatcher, localSource, FakeSettingsRepo(selectedModes = emptyList()), FakeAmSatRepo())
+    }
+
+    /** No AMSAT page, which is the "filter stays quiet" path these tests rely on. */
+    private class FakeAmSatRepo : IAmSatRepository {
+        override suspend fun fetchStatus(): SatStatusPage? = null
+
+        override suspend fun submitReport(submission: AmSatReportSubmission) =
+            AmSatReportSubmitResult(success = false)
     }
 
     private class FakeLocalSource(
@@ -195,6 +208,8 @@ class SelectionRepoTest {
 
         override val selectedSatModes: MutableStateFlow<List<String>> = MutableStateFlow(selectedModes)
 
+        override val selectedAmSatStatuses: MutableStateFlow<Set<SatStatusCategory>> = MutableStateFlow(emptySet())
+
         override val passesSettings: StateFlow<PassesSettings> = MutableStateFlow(
             PassesSettings(hoursAhead = 24, minElevation = 0.0)
         )
@@ -227,6 +242,10 @@ class SelectionRepoTest {
 
         override fun setSelectedSatModes(modes: List<String>) {
             selectedSatModes.value = modes
+        }
+
+        override fun setSelectedAmSatStatuses(statuses: Set<SatStatusCategory>) {
+            selectedAmSatStatuses.value = statuses
         }
 
         override fun setPassesSettings(settings: PassesSettings) = Unit

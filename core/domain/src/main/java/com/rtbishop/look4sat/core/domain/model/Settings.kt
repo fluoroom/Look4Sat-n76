@@ -140,14 +140,23 @@ data class RadioControlSettings(
         const val MODEL_YAESU_FT817   = "Yaesu FT-817/818"
         const val MODEL_YAESU_FT857   = "Yaesu FT-857/897"
         const val MODEL_ICOM_IC705    = "Icom IC-705"
+        /**
+         * Kept for the stored-settings migration only: the N76 is no longer a CAT radio model,
+         * it is the Bluetooth handheld configured by [N76Settings]. See [normalizeModel].
+         */
         const val MODEL_N76           = "VGC N76"
 
         /** Label used for the N76 before it was identified as a VGC; still in stored settings. */
         const val LEGACY_MODEL_N76    = "HYS N76"
 
+        /** The radios that speak CAT. The N76 is not one of them; it has its own settings. */
         val SUPPORTED_RADIOS = listOf(
-            MODEL_YAESU_FT817, MODEL_YAESU_FT857, MODEL_ICOM_IC705, MODEL_N76
+            MODEL_YAESU_FT817, MODEL_YAESU_FT857, MODEL_ICOM_IC705
         )
+
+        /** True for either spelling of the N76, which is what a stored model may still hold. */
+        fun isN76Model(stored: String?): Boolean =
+            stored == MODEL_N76 || stored == LEGACY_MODEL_N76
 
         /** Baud rates available for Yaesu radios. */
         val BAUD_RATES_YAESU = listOf(4800, 9600, 38400)
@@ -155,14 +164,13 @@ data class RadioControlSettings(
         val BAUD_RATES_ICOM  = listOf(4800, 9600, 19200, 38400, 57600, 115200)
 
         /**
-         * Maps a stored radio model onto the current label set. The N76 was labelled
-         * [LEGACY_MODEL_N76] until it was identified as a VGC, and that is the string sitting
-         * in existing installs' preferences. Normalizing on read keeps their radio selected,
-         * instead of falling through to a Yaesu and silently switching N76 control off.
+         * Maps a stored radio model onto the current CAT label set. Either N76 spelling falls
+         * back to the default CAT radio: the handheld moved to [N76Settings], where the stored
+         * model is migrated into `enabled` so those installs keep control of their N76.
          */
         fun normalizeModel(stored: String?): String = when {
             stored.isNullOrBlank() -> MODEL_YAESU_FT817
-            stored == LEGACY_MODEL_N76 -> MODEL_N76
+            isN76Model(stored) -> MODEL_YAESU_FT817
             else -> stored
         }
     }

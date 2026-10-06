@@ -109,6 +109,10 @@
     <string name="amsat_name">Name</string>
     <string name="amsat_load_failed">Load failed - check network and retry</string>
     <string name="amsat_no_reports">No reports for this period</string>
+    <string name="amsat_filter_empty">No satellites match the selected status</string>
+    <string name="amsat_filter">AMSAT status</string>
+    <string name="amsat_filter_none">Any</string>
+    <string name="sat_filter_amsat_hint">AMSAT: %s</string>
     <string name="amsat_close">Close</string>
     <string name="amsat_status_heard">Heard</string>
     <string name="amsat_status_tlm_only">Telemetry Only</string>

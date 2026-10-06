@@ -63,22 +63,54 @@ fun SatStatus.rate(reports: Map<String, SatReport>): SatStatusRating {
     for (slot in slots) {
         for (id in slot.reportIds) {
             val text = reports[id]?.statusText ?: continue
-            when {
-                isHeardReport(text) -> heard++
-                isTelemetryReport(text) -> telemetryOnly++
+            when (categoryOfReport(text)) {
+                SatStatusCategory.Active -> heard++
+                SatStatusCategory.TelemetryOnly -> telemetryOnly++
+                // "Not Heard" and conflicting reports stay out of the count, see SatStatusRating.
+                SatStatusCategory.NotHeard, SatStatusCategory.Conflicting -> Unit
             }
         }
     }
     return SatStatusRating(heard, telemetryOnly, slots.indexOfFirst { it.count > 0 })
 }
 
-// "Crew Active" is the ISS crew working voice, so it counts the same as "Heard".
-private fun isHeardReport(text: String) =
-    (text.contains("Heard", ignoreCase = true) && !text.contains("Not", ignoreCase = true)) ||
-        text.contains("Crew Active", ignoreCase = true)
+/**
+ * The report kinds the AMSAT legend shows, and the unit the status filters work in.
+ *
+ * "Crew Active" is the ISS crew working voice, so it lands in [Active] alongside "Heard".
+ * Anything unrecognised is [Conflicting], matching the deep-orange bucket the AMSAT site uses.
+ */
+enum class SatStatusCategory { Active, TelemetryOnly, NotHeard, Conflicting }
 
-private fun isTelemetryReport(text: String) =
-    text.contains("Telemetry", ignoreCase = true) || text.contains("Beacon", ignoreCase = true)
+/** Classifies one report's status text. Mirrors the colouring in the data layer. */
+fun categoryOfReport(text: String): SatStatusCategory = when {
+    text.contains("Not Heard", ignoreCase = true) -> SatStatusCategory.NotHeard
+    text.contains("Heard", ignoreCase = true) || text.contains("Crew Active", ignoreCase = true) ->
+        SatStatusCategory.Active
+    text.contains("Telemetry", ignoreCase = true) || text.contains("Beacon", ignoreCase = true) ->
+        SatStatusCategory.TelemetryOnly
+    else -> SatStatusCategory.Conflicting
+}
+
+/** Every report kind filed for this satellite, which is what an "at least one" filter tests. */
+fun SatStatus.categories(reports: Map<String, SatReport>): Set<SatStatusCategory> =
+    days.asSequence()
+        .flatMap { it.slots.asSequence() }
+        .flatMap { it.reportIds.asSequence() }
+        .mapNotNull { id -> reports[id]?.statusText?.let(::categoryOfReport) }
+        .toSet()
+
+/**
+ * Keeps the satellites with at least one report in [selected]. An empty selection is no filter,
+ * so the list never collapses to nothing just because the chips were all switched off.
+ */
+fun List<SatStatus>.filteredByCategories(
+    selected: Set<SatStatusCategory>,
+    reports: Map<String, SatReport>
+): List<SatStatus> {
+    if (selected.isEmpty()) return this
+    return filter { status -> status.categories(reports).any { it in selected } }
+}
 
 /**
  * Orders the list for display. Satellites with nothing to go on sink to the bottom of the

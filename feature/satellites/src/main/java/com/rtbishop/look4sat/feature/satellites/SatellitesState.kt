@@ -18,6 +18,7 @@
 package com.rtbishop.look4sat.feature.satellites
 
 import com.rtbishop.look4sat.core.domain.model.SatItem
+import com.rtbishop.look4sat.core.domain.utility.SatStatusCategory
 
 data class SatellitesState(
     val isDialogShown: Boolean = false,
@@ -25,7 +26,9 @@ data class SatellitesState(
     val shouldSeeWarning: Boolean = false,
     val itemsList: List<SatItem> = emptyList(),
     val currentModes: List<String> = emptyList(),
-    val modesList: List<String> = emptyList()
+    val modesList: List<String> = emptyList(),
+    /** AMSAT report kinds a satellite must have at least one of. Empty = no AMSAT filter. */
+    val currentAmSatStatuses: Set<SatStatusCategory> = emptySet()
 )
 
 sealed interface SatellitesAction {
@@ -34,7 +37,10 @@ sealed interface SatellitesAction {
     data class SearchFor(val query: String) : SatellitesAction
     data object SelectAll : SatellitesAction
     data class SelectSingle(val id: Int, val isTicked: Boolean) : SatellitesAction
-    data class SelectModes(val modes: List<String>) : SatellitesAction
-    data object ToggleModesDialog : SatellitesAction
+    data class SelectFilters(
+        val modes: List<String>,
+        val amSatStatuses: Set<SatStatusCategory>
+    ) : SatellitesAction
+    data object ToggleFilterDialog : SatellitesAction
     data object UnselectAll : SatellitesAction
 }

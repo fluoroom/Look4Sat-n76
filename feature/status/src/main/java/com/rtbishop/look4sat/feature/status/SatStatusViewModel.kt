@@ -11,8 +11,10 @@ import com.rtbishop.look4sat.core.domain.model.SatStatusPage
 import com.rtbishop.look4sat.core.domain.repository.IAmSatRepository
 import com.rtbishop.look4sat.core.domain.repository.IMainContainer
 import com.rtbishop.look4sat.core.domain.repository.ISettingsRepo
+import com.rtbishop.look4sat.core.domain.utility.SatStatusCategory
 import com.rtbishop.look4sat.core.domain.utility.SatStatusRating
 import com.rtbishop.look4sat.core.domain.utility.SatStatusSort
+import com.rtbishop.look4sat.core.domain.utility.filteredByCategories
 import com.rtbishop.look4sat.core.domain.utility.rateAll
 import com.rtbishop.look4sat.core.domain.utility.sortedForDisplay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -44,10 +46,12 @@ data class AmSatUploadUiState(
 data class SatStatusUiState(
     val isLoading: Boolean = false,
     val isRefreshing: Boolean = false,
-    /** Already ordered by [sort]; the unsorted fetch is kept in the view model. */
+    /** Already filtered and ordered; the raw fetch is kept in the view model. */
     val statuses: List<SatStatus> = emptyList(),
     val reports: Map<String, SatReport> = emptyMap(),
     val sort: SatStatusSort = SatStatusSort.Name,
+    /** Report kinds a satellite must have at least one of. Empty = every satellite. */
+    val categoryFilter: Set<SatStatusCategory> = emptySet(),
     val ratings: Map<String, SatStatusRating> = emptyMap(),
     val fetchedAtUtcMs: Long = 0L,
     val error: String? = null,
@@ -113,21 +117,34 @@ class SatStatusViewModel(
             it.copy(
                 isLoading = false,
                 isRefreshing = false,
-                statuses = page.statuses.sortedForDisplay(it.sort, ratings),
                 reports = page.reports,
                 ratings = ratings,
                 fetchedAtUtcMs = page.fetchedAtUtcMs,
                 error = null
-            )
+            ).withDisplayList()
         }
     }
 
     fun setSort(sort: SatStatusSort) {
-        _uiState.update {
-            if (it.sort == sort) it
-            else it.copy(sort = sort, statuses = fetchedStatuses.sortedForDisplay(sort, it.ratings))
+        _uiState.update { if (it.sort == sort) it else it.copy(sort = sort).withDisplayList() }
+    }
+
+    /** Legend chips double as the filter, so a tap toggles one report kind in or out. */
+    fun toggleCategory(category: SatStatusCategory) {
+        _uiState.update { state ->
+            val filter = state.categoryFilter.let {
+                if (category in it) it - category else it + category
+            }
+            state.copy(categoryFilter = filter).withDisplayList()
         }
     }
+
+    /** Re-derives the visible list from the fetch; re-sorting never goes back to the network. */
+    private fun SatStatusUiState.withDisplayList() = copy(
+        statuses = fetchedStatuses
+            .filteredByCategories(categoryFilter, reports)
+            .sortedForDisplay(sort, ratings)
+    )
 
     fun toggleUploadPanel() {
         val storedCallsign = settingsRepo.getAmSatCallsign()

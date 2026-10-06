@@ -604,20 +604,27 @@ fun PreviewBluetoothOutputDialog() {
                 bluetoothFrequencyAddress = "00:0C:BF:13:80:5D",
                 bluetoothFrequencyFormat = $$"F $FREQ"
             ),
+            initialN76 = N76Settings(),
+            pairedBluetoothDevices = emptyList(),
             onDismiss = {},
-            onSave = { _, _, _, _, _, _ -> }
+            onSave = { _, _ -> }
         )
     }
 }
 
+/**
+ * Bluetooth output: the rotator and frequency channels, plus the N76 handheld. The N76 lives here
+ * rather than with CAT because it speaks its own Bluetooth protocol, not CAT — its switch, device
+ * and options are the whole of its configuration.
+ */
 @Composable
 fun BluetoothOutputDialog(
     initialSettings: RCSettings,
+    initialN76: N76Settings,
+    pairedBluetoothDevices: List<Pair<String, String>>,
+    onRefreshPaired: () -> Unit = {},
     onDismiss: () -> Unit,
-    onSave: (
-        Boolean, String, String,
-        Boolean, String, String
-    ) -> Unit
+    onSave: (RCSettings, N76Settings) -> Unit
 ) {
     val padding = LocalSpacing.current.large
     val rotatorState = rememberSaveable { mutableStateOf(initialSettings.bluetoothRotatorState) }
@@ -630,10 +637,65 @@ fun BluetoothOutputDialog(
         rememberSaveable { mutableStateOf(initialSettings.bluetoothFrequencyAddress) }
     val frequencyFormat =
         rememberSaveable { mutableStateOf(initialSettings.bluetoothFrequencyFormat) }
+
+    val context = LocalContext.current
+    val n76Enabled = rememberSaveable { mutableStateOf(initialN76.enabled) }
+    val n76Address = rememberSaveable { mutableStateOf(initialN76.deviceAddress) }
+    val n76Name = rememberSaveable { mutableStateOf(initialN76.deviceName) }
+    val sendSatInfo = rememberSaveable { mutableStateOf(initialN76.sendSatInfo) }
+    val satFirmware = rememberSaveable { mutableStateOf(initialN76.satFirmware) }
+    val pollMs = rememberSaveable { mutableLongStateOf(initialN76.pollIntervalMs) }
+    val forceRx = rememberSaveable { mutableStateOf(initialN76.forceRxCtcss) }
+    val forceRxTone = rememberSaveable { mutableIntStateOf(initialN76.forceRxCtcssHzx100) }
+    val forceTx = rememberSaveable { mutableStateOf(initialN76.forceTxCtcss) }
+    val forceTxTone = rememberSaveable { mutableIntStateOf(initialN76.forceTxCtcssHzx100) }
+    val audioRfcomm = rememberSaveable { mutableStateOf(initialN76.audioRfcomm) }
+    val speakerMonitor = rememberSaveable { mutableStateOf(initialN76.speakerMonitor) }
+    val recordHt = rememberSaveable { mutableStateOf(initialN76.recordHt) }
+    val recordMic = rememberSaveable { mutableStateOf(initialN76.recordMic) }
+    val recordSatOnly = rememberSaveable { mutableStateOf(initialN76.recordSatOnly) }
+    val outputFolder = rememberSaveable { mutableStateOf(initialN76.outputFolderUri) }
+
+    val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
+        if (uri != null) {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+            outputFolder.value = uri.toString()
+        }
+    }
+
+    LaunchedEffect(Unit) { onRefreshPaired() }
+
     val onAccept = {
         onSave(
-            rotatorState.value, rotatorAddress.value, rotatorFormat.value,
-            frequencyState.value, frequencyAddress.value, frequencyFormat.value
+            initialSettings.copy(
+                bluetoothRotatorState = rotatorState.value,
+                bluetoothRotatorAddress = rotatorAddress.value,
+                bluetoothRotatorFormat = rotatorFormat.value,
+                bluetoothFrequencyState = frequencyState.value,
+                bluetoothFrequencyAddress = frequencyAddress.value,
+                bluetoothFrequencyFormat = frequencyFormat.value
+            ),
+            initialN76.copy(
+                enabled = n76Enabled.value,
+                deviceAddress = BluetoothAddress.normalize(n76Address.value),
+                deviceName = n76Name.value,
+                sendSatInfo = sendSatInfo.value,
+                satFirmware = satFirmware.value,
+                pollIntervalMs = pollMs.longValue,
+                forceRxCtcss = forceRx.value,
+                forceRxCtcssHzx100 = forceRxTone.intValue,
+                forceTxCtcss = forceTx.value,
+                forceTxCtcssHzx100 = forceTxTone.intValue,
+                audioRfcomm = audioRfcomm.value,
+                speakerMonitor = speakerMonitor.value,
+                recordHt = recordHt.value,
+                recordMic = recordMic.value,
+                recordSatOnly = recordSatOnly.value,
+                outputFolderUri = outputFolder.value
+            )
         )
         onDismiss()
     }
@@ -642,7 +704,12 @@ fun BluetoothOutputDialog(
         onCancel = onDismiss,
         onAccept = onAccept
     ) {
-        Column(modifier = Modifier.padding(horizontal = padding)) {
+        Column(
+            modifier = Modifier
+                .padding(horizontal = padding)
+                .heightIn(max = 560.dp)
+                .verticalScroll(rememberScrollState())
+        ) {
             OutputChannelSection(
                 switchLabel = stringResource(R.string.prefs_bt_rotator_switch),
                 enabled = rotatorState.value,
@@ -666,7 +733,61 @@ fun BluetoothOutputDialog(
                 onFormatChange = { frequencyFormat.value = it },
                 formatLabel = stringResource(R.string.prefs_bt_frequency_output_hint)
             )
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(6.dp))
+            // The switch rides the device row, so the N76 block costs no extra line.
+            N76DevicePicker(
+                enabled = n76Enabled.value,
+                mac = n76Address.value,
+                onMacChange = { raw ->
+                    n76Address.value = raw
+                    if (n76Name.value.isBlank()) n76Name.value = "N76"
+                },
+                savedDevices = pairedBluetoothDevices,
+                onPick = { name, address ->
+                    n76Address.value = address
+                    n76Name.value = name
+                },
+                trailing = {
+                    Switch(
+                        checked = n76Enabled.value,
+                        onCheckedChange = { n76Enabled.value = it }
+                    )
+                }
+            )
+            // The options only appear once the handheld is switched on, so the dialog stays short
+            // for everyone who does not own one.
+            if (n76Enabled.value) N76DebugSettings(
+                enabled = true,
+                sendSatInfo = sendSatInfo.value,
+                onSendSatInfo = { sendSatInfo.value = it },
+                satFirmware = satFirmware.value,
+                onSatFirmware = { satFirmware.value = it },
+                pollMs = pollMs.longValue,
+                onPollMs = { pollMs.longValue = it },
+                forceRx = forceRx.value,
+                onForceRx = { forceRx.value = it },
+                forceRxTone = forceRxTone.intValue,
+                onForceRxTone = { forceRxTone.intValue = it },
+                forceTx = forceTx.value,
+                onForceTx = { forceTx.value = it },
+                forceTxTone = forceTxTone.intValue,
+                onForceTxTone = { forceTxTone.intValue = it },
+                audioRfcomm = audioRfcomm.value,
+                onAudioRfcomm = { audioRfcomm.value = it },
+                speakerMonitor = speakerMonitor.value,
+                onSpeakerMonitor = { speakerMonitor.value = it },
+                recordHt = recordHt.value,
+                onRecordHt = {
+                    recordHt.value = it
+                    if (it) audioRfcomm.value = true
+                },
+                recordMic = recordMic.value,
+                onRecordMic = { recordMic.value = it },
+                recordSatOnly = recordSatOnly.value,
+                onRecordSatOnly = { recordSatOnly.value = it },
+                outputFolder = outputFolder.value,
+                onPickFolder = { folderPicker.launch(null) }
+            )
         }
     }
 }
@@ -718,17 +839,16 @@ private fun OutputChannelSection(
     }
 }
 
+/** CAT control: the radios that speak CAT. The N76 handheld lives in [BluetoothOutputDialog]. */
 @Composable
 fun RadioControlDialog(
     initialSettings: RadioControlSettings,
-    initialN76: N76Settings,
     pairedBluetoothDevices: List<Pair<String, String>>,
     onRefreshPaired: () -> Unit = {},
     onDismiss: () -> Unit,
-    onSave: (RadioControlSettings, N76Settings) -> Unit
+    onSave: (RadioControlSettings) -> Unit
 ) {
     val padding = LocalSpacing.current.large
-    val context = LocalContext.current
     val enabled = rememberSaveable { mutableStateOf(initialSettings.enabled) }
     val radioModel = rememberSaveable { mutableStateOf(initialSettings.radioModel) }
     val splitMode = rememberSaveable { mutableStateOf(initialSettings.splitMode) }
@@ -739,35 +859,10 @@ fun RadioControlDialog(
     val baudRate = rememberSaveable { mutableIntStateOf(initialSettings.baudRate) }
     val selectingFor = rememberSaveable { mutableStateOf("") } // "tx", "rx", or ""
 
-    val sendSatInfo = rememberSaveable { mutableStateOf(initialN76.sendSatInfo) }
-    val satFirmware = rememberSaveable { mutableStateOf(initialN76.satFirmware) }
-    val pollMs = rememberSaveable { mutableLongStateOf(initialN76.pollIntervalMs) }
-    val forceRx = rememberSaveable { mutableStateOf(initialN76.forceRxCtcss) }
-    val forceRxTone = rememberSaveable { mutableIntStateOf(initialN76.forceRxCtcssHzx100) }
-    val forceTx = rememberSaveable { mutableStateOf(initialN76.forceTxCtcss) }
-    val forceTxTone = rememberSaveable { mutableIntStateOf(initialN76.forceTxCtcssHzx100) }
-    val audioRfcomm = rememberSaveable { mutableStateOf(initialN76.audioRfcomm) }
-    val speakerMonitor = rememberSaveable { mutableStateOf(initialN76.speakerMonitor) }
-    val recordHt = rememberSaveable { mutableStateOf(initialN76.recordHt) }
-    val recordMic = rememberSaveable { mutableStateOf(initialN76.recordMic) }
-    val recordSatOnly = rememberSaveable { mutableStateOf(initialN76.recordSatOnly) }
-    val outputFolder = rememberSaveable { mutableStateOf(initialN76.outputFolderUri) }
-
-    val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
-        if (uri != null) {
-            context.contentResolver.takePersistableUriPermission(
-                uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-            )
-            outputFolder.value = uri.toString()
-        }
-    }
-
     LaunchedEffect(Unit) { onRefreshPaired() }
 
-    val isN76 = radioModel.value == RadioControlSettings.MODEL_N76
     val isIcom = radioModel.value == RadioControlSettings.MODEL_ICOM_IC705
-    val isSingleRadio = isN76 || (isIcom && splitMode.value)
+    val isSingleRadio = isIcom && splitMode.value
 
     // Reset split mode when switching away from IC-705
     if (!isIcom && splitMode.value) splitMode.value = false
@@ -783,27 +878,12 @@ fun RadioControlDialog(
             RadioControlSettings(
                 enabled = enabled.value,
                 radioModel = radioModel.value,
-                txRadioAddress = if (isN76) BluetoothAddress.normalize(txAddress.value) else txAddress.value,
+                txRadioAddress = txAddress.value,
                 rxRadioAddress = if (isSingleRadio) "" else rxAddress.value,
                 txRadioName = txName.value,
                 rxRadioName = if (isSingleRadio) "" else rxName.value,
                 baudRate = baudRate.intValue,
                 splitMode = splitMode.value
-            ),
-            N76Settings(
-                sendSatInfo = sendSatInfo.value,
-                satFirmware = satFirmware.value,
-                pollIntervalMs = pollMs.longValue,
-                forceRxCtcss = forceRx.value,
-                forceRxCtcssHzx100 = forceRxTone.intValue,
-                forceTxCtcss = forceTx.value,
-                forceTxCtcssHzx100 = forceTxTone.intValue,
-                audioRfcomm = audioRfcomm.value,
-                speakerMonitor = speakerMonitor.value,
-                recordHt = recordHt.value,
-                recordMic = recordMic.value,
-                recordSatOnly = recordSatOnly.value,
-                outputFolderUri = outputFolder.value
             )
         )
         onDismiss()
@@ -860,7 +940,7 @@ fun RadioControlDialog(
             }
             Spacer(modifier = Modifier.height(6.dp))
 
-            val isSplitModeAvailable = enabled.value && isIcom && !isN76
+            val isSplitModeAvailable = enabled.value && isIcom
             val splitModeLabelColor = if (isSplitModeAvailable) {
                 MaterialTheme.colorScheme.onSurface
             } else {
@@ -884,23 +964,6 @@ fun RadioControlDialog(
             }
             Spacer(modifier = Modifier.height(6.dp))
 
-            if (isN76) {
-                N76DevicePicker(
-                    enabled = enabled.value,
-                    mac = txAddress.value,
-                    onMacChange = { raw ->
-                        txAddress.value = raw
-                        if (txName.value.isBlank() || txName.value == "TX Radio") txName.value = "N76"
-                    },
-                    savedDevices = pairedBluetoothDevices,
-                    onPick = { name, address ->
-                        txAddress.value = address
-                        txName.value = name
-                        rxAddress.value = address
-                        rxName.value = name
-                    }
-                )
-            } else {
             Text("Radio devices", fontWeight = FontWeight.Medium)
             Row(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -972,69 +1035,31 @@ fun RadioControlDialog(
                 }
                 Spacer(modifier = Modifier.height(6.dp))
             }
-            }
 
-            if (!isN76) {
-                Text("Baud Rate:", fontWeight = FontWeight.Medium)
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                    maxItemsInEachRow = 6,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    baudRates.forEach { rate ->
-                        FilterChip(
-                            selected = rate == baudRate.intValue,
-                            onClick = { baudRate.intValue = rate },
-                            label = {
-                                Text(
-                                    text = baudLabel(rate),
-                                    fontSize = 12.sp,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                            },
-                            enabled = enabled.value,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
+            Text("Baud Rate:", fontWeight = FontWeight.Medium)
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                maxItemsInEachRow = 6,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                baudRates.forEach { rate ->
+                    FilterChip(
+                        selected = rate == baudRate.intValue,
+                        onClick = { baudRate.intValue = rate },
+                        label = {
+                            Text(
+                                text = baudLabel(rate),
+                                fontSize = 12.sp,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        },
+                        enabled = enabled.value,
+                        modifier = Modifier.weight(1f)
+                    )
                 }
-                Spacer(modifier = Modifier.height(6.dp))
             }
-
-            if (isN76) {
-                N76DebugSettings(
-                    enabled = enabled.value,
-                    sendSatInfo = sendSatInfo.value,
-                    onSendSatInfo = { sendSatInfo.value = it },
-                    satFirmware = satFirmware.value,
-                    onSatFirmware = { satFirmware.value = it },
-                    pollMs = pollMs.longValue,
-                    onPollMs = { pollMs.longValue = it },
-                    forceRx = forceRx.value,
-                    onForceRx = { forceRx.value = it },
-                    forceRxTone = forceRxTone.intValue,
-                    onForceRxTone = { forceRxTone.intValue = it },
-                    forceTx = forceTx.value,
-                    onForceTx = { forceTx.value = it },
-                    forceTxTone = forceTxTone.intValue,
-                    onForceTxTone = { forceTxTone.intValue = it },
-                    audioRfcomm = audioRfcomm.value,
-                    onAudioRfcomm = { audioRfcomm.value = it },
-                    speakerMonitor = speakerMonitor.value,
-                    onSpeakerMonitor = { speakerMonitor.value = it },
-                    recordHt = recordHt.value,
-                    onRecordHt = {
-                        recordHt.value = it
-                        if (it) audioRfcomm.value = true
-                    },
-                    recordMic = recordMic.value,
-                    onRecordMic = { recordMic.value = it },
-                    recordSatOnly = recordSatOnly.value,
-                    onRecordSatOnly = { recordSatOnly.value = it },
-                    outputFolder = outputFolder.value,
-                    onPickFolder = { folderPicker.launch(null) }
-                )
-            }
+            Spacer(modifier = Modifier.height(6.dp))
         }
     }
 }
@@ -1046,7 +1071,8 @@ private fun N76DevicePicker(
     mac: String,
     onMacChange: (String) -> Unit,
     savedDevices: List<Pair<String, String>>,
-    onPick: (name: String, address: String) -> Unit
+    onPick: (name: String, address: String) -> Unit,
+    trailing: @Composable () -> Unit = {}
 ) {
     val normalized = BluetoothAddress.normalize(mac)
     val macOk = mac.isBlank() || BluetoothAddress.isValid(mac)
@@ -1064,45 +1090,54 @@ private fun N76DevicePicker(
         onPick(match.first, match.second)
     }
 
-    Text("N76 device", fontWeight = FontWeight.Medium)
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { if (enabled) expanded = it }
+    // The field's own label names the section, so no heading line is needed above it, and
+    // [trailing] keeps the on/off switch on this same row.
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth()
     ) {
-        OutlinedTextField(
-            value = selectLabel,
-            onValueChange = {},
-            readOnly = true,
-            enabled = enabled,
-            singleLine = true,
-            label = { Text("Saved Bluetooth") },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
-            modifier = Modifier
-                .menuAnchor()
-                .fillMaxWidth()
-        )
-        ExposedDropdownMenu(
+        ExposedDropdownMenuBox(
             expanded = expanded,
-            onDismissRequest = { expanded = false }
+            onExpandedChange = { if (enabled) expanded = it },
+            modifier = Modifier.weight(1f)
         ) {
-            if (savedDevices.isEmpty()) {
-                DropdownMenuItem(
-                    text = { Text("No saved devices") },
-                    onClick = { expanded = false },
-                    enabled = false
-                )
-            } else {
-                savedDevices.forEach { (name, address) ->
+            OutlinedTextField(
+                value = selectLabel,
+                onValueChange = {},
+                readOnly = true,
+                enabled = enabled,
+                singleLine = true,
+                label = { Text("N76 device") },
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+                modifier = Modifier
+                    .menuAnchor()
+                    .fillMaxWidth()
+            )
+            ExposedDropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false }
+            ) {
+                if (savedDevices.isEmpty()) {
                     DropdownMenuItem(
-                        text = { Text("$name  ($address)", fontSize = 13.sp) },
-                        onClick = {
-                            onPick(name, address)
-                            expanded = false
-                        }
+                        text = { Text("No saved devices") },
+                        onClick = { expanded = false },
+                        enabled = false
                     )
+                } else {
+                    savedDevices.forEach { (name, address) ->
+                        DropdownMenuItem(
+                            text = { Text("$name  ($address)", fontSize = 13.sp) },
+                            onClick = {
+                                onPick(name, address)
+                                expanded = false
+                            }
+                        )
+                    }
                 }
             }
         }
+        trailing()
     }
     OutlinedTextField(
         value = mac,
@@ -1153,11 +1188,6 @@ private fun N76DebugSettings(
     outputFolder: String,
     onPickFolder: () -> Unit
 ) {
-    Text(
-        "N76 debug (all optional)",
-        fontWeight = FontWeight.Medium,
-        color = MaterialTheme.colorScheme.primary
-    )
     N76SwitchRow("Send sat info & freq (HT sat mode)", sendSatInfo, onSendSatInfo, enabled)
     N76SwitchRow("Sat firmware ≥137 (16-byte SAT mode)", satFirmware, onSatFirmware, enabled)
     ChoiceDropdown(
@@ -1281,7 +1311,6 @@ private fun compactRadioModelLabel(model: String): String = when (model) {
     RadioControlSettings.MODEL_YAESU_FT817 -> "FT-817/818"
     RadioControlSettings.MODEL_YAESU_FT857 -> "FT-857/897"
     RadioControlSettings.MODEL_ICOM_IC705 -> "IC-705"
-    RadioControlSettings.MODEL_N76 -> "N76 BT"
     else -> model
 }
 
