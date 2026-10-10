@@ -80,17 +80,18 @@
         \n\nPlease update the database at least weekly to get accurate predictions.</string>
     <string name="pass_whatsnew_title" translatable="false">What\'s new in Look4Sat</string>
     <string name="pass_whatsnew_message" translatable="false">
-        * AMSAT status filters. Pick Active, TLM/Beacon, Not Heard or Conflicting and a satellite
-        is shown when it has at least one report of that kind; pick none and nothing is filtered.
-        On the AMSAT screen the legend chips are the filter. The satellite list has its own,
-        kept between runs, in the filter dialog next to the modes.
-        \n\n* The VGC N76 moved out of CAT and into Bluetooth settings, where it has its own
-        on/off switch, device picker and options. CAT now lists only the radios that speak CAT.
-        An existing N76 setup carries over, and its controls appear on the tracking screen only
-        while the switch is on.
-        \n\nMerged from upstream:
-        \n\n* Every pass row now carries its own AOS/LOS timer and progress bar
-        \n\n* Added a search filter over the pass list
+        * APRS tab on the tracking screen: callsign, message, path, icon and a location you set
+        by hand or with one tap on GPS. Send once or beacon on a timer, through the N76 (the
+        radio\'s own beacon), a Bluetooth KISS TNC, or audio tones. Sent and received packets
+        are logged in raw form.
+        \n\n* AMSAT: every pass shows a heard / beacon only / not heard / no data icon, the pass
+        filter gains "Only AMSAT heard", and Not Heard reports no longer count as the last time
+        a satellite was heard.
+        \n\n* N76: recordings are stereo (phone mic left, HT right) with a mic picker and gain;
+        new options for TX power, opening the squelch while tracking and sending the station
+        position on connect; poll interval up to 15 s, 10 s by default.
+        \n\n* Settings: choose the data auto-update interval, take the station position from GPS
+        automatically, and correct the app clock from GPS time.
     </string>
 
     <!-- AMSAT Status screen -->
