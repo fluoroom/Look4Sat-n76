@@ -54,8 +54,17 @@ class SatStatusRankingTest {
         val rating = sat("DEAD", listOf("Not Heard")).rate(reports)
         assertNull(rating.heardRatio)
         assertEquals(0, rating.sampleCount)
-        // It was still reported on, so freshness is known even though the ratio is not.
-        assertEquals(0, rating.hoursSinceLastReport)
+        // It was reported on, but a Not Heard report says nothing about when it was last heard.
+        assertNull(rating.hoursSinceLastReport)
+        assertEquals(0, rating.anyReportRank)
+        assertEquals(1, rating.trustTier)
+    }
+
+    @Test
+    fun `a newer Not Heard report does not refresh the last-heard time`() {
+        val rating = sat("FADING", listOf("Not Heard"), emptyList(), listOf("Heard")).rate(reports)
+        assertEquals(2, rating.freshnessRank)
+        assertEquals(0, rating.anyReportRank)
     }
 
     @Test
@@ -91,9 +100,8 @@ class SatStatusRankingTest {
         val onlyNotHeard = sat("BBB-NOTHEARD", listOf("Not Heard"))
         val all = listOf(silent, onlyNotHeard, good)
         val sorted = all.sortedForDisplay(SatStatusSort.BestHeard, all.rateAll(reports))
-        assertEquals("GOOD", sorted.first().name)
-        // Both unusable ones trail, ordered by name so the list stays stable.
-        assertEquals(listOf("AAA-SILENT", "BBB-NOTHEARD"), sorted.drop(1).map { it.name })
+        // Not Heard only is worth just more than no data at all, whatever the names say.
+        assertEquals(listOf("GOOD", "BBB-NOTHEARD", "AAA-SILENT"), sorted.map { it.name })
     }
 
     @Test
@@ -101,9 +109,11 @@ class SatStatusRankingTest {
         val fresh = sat("FRESH", listOf("Heard"))
         val older = sat("OLDER", emptyList(), emptyList(), listOf("Telemetry Only"))
         val never = sat("AAA-NEVER")
-        val all = listOf(never, older, fresh)
+        // Reported on a moment ago, but only as Not Heard: that must not beat a real reception.
+        val notHeard = sat("AAB-NOTHEARD", listOf("Not Heard"))
+        val all = listOf(never, notHeard, older, fresh)
         val sorted = all.sortedForDisplay(SatStatusSort.LastHeard, all.rateAll(reports))
-        assertEquals(listOf("FRESH", "OLDER", "AAA-NEVER"), sorted.map { it.name })
+        assertEquals(listOf("FRESH", "OLDER", "AAB-NOTHEARD", "AAA-NEVER"), sorted.map { it.name })
     }
 
     @Test

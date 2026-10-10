@@ -17,6 +17,7 @@
  */
 package com.rtbishop.look4sat.feature.radar
 
+import android.content.pm.ApplicationInfo
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
@@ -73,6 +74,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
@@ -575,7 +577,9 @@ private fun N76DebugPanel(n76: N76RuntimeState, onAction: (RadarAction) -> Unit)
         n76.lastRecordPath?.let { append(" · ${it.substringAfterLast('/')}") }
     }
     Text(status, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    if (n76.logs.isNotEmpty()) {
+    // The link log is a debugging aid: debug builds only, never a release APK.
+    val isDebugBuild = LocalContext.current.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
+    if (isDebugBuild && n76.logs.isNotEmpty()) {
         Text(
             text = n76.logs.takeLast(6).joinToString("\n"),
             fontSize = 10.sp,

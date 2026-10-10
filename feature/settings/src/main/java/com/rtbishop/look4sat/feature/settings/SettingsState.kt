@@ -64,6 +64,10 @@ sealed interface SettingsAction {
     // Toggles
     data class ToggleUtc(val value: Boolean) : SettingsAction
     data class ToggleUpdate(val value: Boolean) : SettingsAction
+    data class SetAutoUpdateInterval(val minutes: Int) : SettingsAction
+    data class ToggleAutoGps(val value: Boolean) : SettingsAction
+    data class ToggleGpsTime(val value: Boolean) : SettingsAction
+    data object SyncWithGps : SettingsAction
     data class ToggleSweep(val value: Boolean) : SettingsAction
     data class ToggleSensor(val value: Boolean) : SettingsAction
     data class ToggleLightTheme(val value: Boolean) : SettingsAction

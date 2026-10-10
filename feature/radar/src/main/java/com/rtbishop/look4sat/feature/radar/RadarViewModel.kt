@@ -21,6 +21,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import java.util.Locale
+import java.util.Date
+import java.text.SimpleDateFormat
+import com.rtbishop.look4sat.core.domain.model.AprsTransport
+import com.rtbishop.look4sat.core.domain.aprs.Afsk1200Demodulator
+import com.rtbishop.look4sat.core.domain.aprs.Ax25
+import com.rtbishop.look4sat.core.domain.model.AprsSettings
+import com.rtbishop.look4sat.core.domain.aprs.Aprs
 import com.rtbishop.look4sat.core.domain.model.AudioSource
 import com.rtbishop.look4sat.core.domain.model.SatRadio
 import com.rtbishop.look4sat.core.domain.predict.CelestialComputer
@@ -33,6 +41,7 @@ import com.rtbishop.look4sat.core.domain.repository.IReporter
 import com.rtbishop.look4sat.core.domain.repository.ISatelliteRepo
 import com.rtbishop.look4sat.core.domain.repository.ISensorsRepo
 import com.rtbishop.look4sat.core.domain.repository.ISettingsRepo
+import com.rtbishop.look4sat.core.domain.utility.AppClock
 import com.rtbishop.look4sat.core.domain.sstv.LineRecoveryStrategy
 import com.rtbishop.look4sat.core.domain.sstv.SstvDecoder
 import com.rtbishop.look4sat.core.domain.usecase.IAudioCapture
@@ -68,7 +77,8 @@ class RadarViewModel(
     private val trackingService: IRadioTrackingService,
     private val audioCapture: IAudioCapture,
     private val saveImage: ISaveImage,
-    private val showToast: IShowToast
+    private val showToast: IShowToast,
+    private val audioOutputs: () -> List<Pair<Int, String>>
 ) : ViewModel() {
 
     private var stationPos = settingsRepo.stationPosition.value
@@ -78,6 +88,8 @@ class RadarViewModel(
     private var transponders: List<SatRadio> = emptyList()
     private var sstvDecoder: SstvDecoder? = null
     private var sstvRecordingJob: Job? = null
+    private var aprsBeaconJob: Job? = null
+    private var aprsListenJob: Job? = null
     private var sensorCollectionJob: Job? = null
 
     // Celestial positions change slowly, recompute at most once per minute
@@ -94,7 +106,8 @@ class RadarViewModel(
             sstv = SstvSubState(
             selectedMode = settingsRepo.otherSettings.value.sstvMode,
             selectedAudioSource = settingsRepo.otherSettings.value.audioSource
-        )
+        ),
+            aprs = AprsSubState(settings = settingsRepo.aprsSettings.value)
         )
     )
     val uiState: StateFlow<RadarState> = _uiState
@@ -212,7 +225,7 @@ class RadarViewModel(
     // --- Per-second tick ---
 
     private suspend fun tickPass(pass: OrbitalPass, allRadios: List<SatRadio>) {
-        val timeNow = System.currentTimeMillis()
+        val timeNow = AppClock.now()
         val pos = satelliteRepo.getPosition(pass.orbitalObject, stationPos, timeNow)
 
         // Recompute celestial positions at most once per minute (they move very slowly)
@@ -266,6 +279,9 @@ class RadarViewModel(
     }
 
     private fun collectN76State() {
+        viewModelScope.launch {
+            trackingService.aprsReceived.collect { frame -> logAprsFrame("RX", frame) }
+        }
         viewModelScope.launch {
             trackingService.n76State.collect { n76 ->
                 _uiState.update {
@@ -339,7 +355,14 @@ class RadarViewModel(
             RadarAction.DisconnectRadios -> viewModelScope.launch { trackingService.disconnectRadios() }
             is RadarAction.SetPtt -> trackingService.setPtt(action.on)
             is RadarAction.SetN76Monitor -> trackingService.setN76Monitor(action.on)
-            RadarAction.N76RecordStart -> trackingService.startN76Recording()
+            RadarAction.N76RecordStart -> {
+                // The microphone permission is asked for on the SSTV tab; say so rather than
+                // record a silent mic channel without a word.
+                if (settingsRepo.n76Settings.value.recordMic && !_uiState.value.sstv.hasPermission) {
+                    showToast("Phone mic not recorded: grant the microphone permission on the SSTV tab")
+                }
+                trackingService.startN76Recording()
+            }
             RadarAction.N76RecordStop -> trackingService.stopN76Recording()
             RadarAction.N76PlayLast -> trackingService.playLastN76Recording()
             RadarAction.N76StopPlayback -> trackingService.stopN76Playback()
@@ -392,6 +415,27 @@ class RadarViewModel(
                 _uiState.update { it.copy(sstv = it.sstv.copy(selectedAudioSource = action.source, audioSourceError = null)) }
                 settingsRepo.updateOtherSettings { it.copy(audioSource = action.source) }
             }
+            // APRS actions
+            is RadarAction.AprsUpdate -> {
+                // Listening belongs to one connection and one input: a change of either ends it.
+                val old = _uiState.value.aprs.settings
+                val sameInput = old.transport == action.settings.transport &&
+                    old.audioSource == action.settings.audioSource
+                if (!sameInput && _uiState.value.aprs.isListening) setAprsListening(false)
+                if (old.transport != action.settings.transport && _uiState.value.aprs.isBeaconing) {
+                    setAprsBeaconing(false)
+                }
+                settingsRepo.updateAprsSettings(action.settings)
+                _uiState.update { it.copy(aprs = it.aprs.copy(settings = action.settings)) }
+            }
+            RadarAction.AprsSend -> viewModelScope.launch { sendAprsBeacon() }
+            is RadarAction.AprsSetBeaconing -> setAprsBeaconing(action.on)
+            RadarAction.AprsLocationFromGps -> fillAprsLocationFromGps()
+            is RadarAction.AprsSetListening -> setAprsListening(action.on)
+            RadarAction.AprsRefreshAudioOutputs ->
+                _uiState.update { it.copy(aprs = it.aprs.copy(audioOutputs = audioOutputs())) }
+            RadarAction.AprsLocationDenied ->
+                _uiState.update { it.copy(aprs = it.aprs.copy(status = "Location permission denied")) }
             RadarAction.SstvReset -> {
                 sstvDecoder?.clearPixels()
                 _uiState.update { it.copy(sstv = it.sstv.copy(currentFrame = null)) }
@@ -472,6 +516,101 @@ class RadarViewModel(
                 return@update state
             }
             state.copy(transceivers = current.copy(transmitters = transmitters, selectedFrequency = freq))
+        }
+    }
+
+    /** Sends what is on the page right now; returns false when it could not go out. */
+    private suspend fun sendAprsBeacon(): Boolean {
+        val settings = _uiState.value.aprs.settings
+        // The N76 builds its own packet from the settings stored in it; there is no frame to make.
+        val frame = if (settings.transport == AprsTransport.N76) null else try {
+            Aprs.beaconFrame(settings)
+        } catch (e: IllegalArgumentException) {
+            _uiState.update { it.copy(aprs = it.aprs.copy(status = e.message.orEmpty())) }
+            return false
+        }
+        _uiState.update { it.copy(aprs = it.aprs.copy(isSending = true)) }
+        val error = trackingService.sendAprs(frame ?: ByteArray(0), settings)
+        if (error == null) {
+            if (frame != null) logAprsFrame("TX", frame) else logAprsLine("TX", "N76 beacon, from the radio's own APRS settings")
+        }
+        val status = error ?: "Sent via ${settings.transport.label}"
+        _uiState.update { it.copy(aprs = it.aprs.copy(isSending = false, status = status)) }
+        return error == null
+    }
+
+
+    // Anything that is not a UI frame is still shown, as hex, rather than dropped.
+    private fun logAprsFrame(direction: String, frame: ByteArray) =
+        logAprsLine(direction, Ax25.toTnc2(frame) ?: frame.joinToString(" ") { "%02X".format(it) })
+
+    private fun logAprsLine(direction: String, text: String) {
+        val time = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(AppClock.now()))
+        _uiState.update { it.copy(aprs = it.aprs.copy(log = (it.aprs.log + "$time $direction $text").takeLast(APRS_LOG_LINES))) }
+    }
+
+    /**
+     * The N76 and a Bluetooth TNC deliver frames through the tracking service once asked to;
+     * audio has to be captured and decoded here.
+     */
+    private fun setAprsListening(on: Boolean) {
+        aprsListenJob?.cancel()
+        aprsListenJob = null
+        _uiState.update { it.copy(aprs = it.aprs.copy(isListening = on)) }
+        if (!on) return
+        val settings = _uiState.value.aprs.settings
+        fun fail(reason: String) =
+            _uiState.update { it.copy(aprs = it.aprs.copy(isListening = false, status = reason)) }
+        when (settings.transport) {
+            AprsTransport.N76, AprsTransport.BluetoothTnc -> aprsListenJob = viewModelScope.launch {
+                trackingService.startAprsReceive(settings)?.let(::fail)
+            }
+            AprsTransport.Audio -> {
+                if (!_uiState.value.sstv.hasPermission) return fail("Microphone permission needed (grant it on the SSTV tab)")
+                val demodulator = Afsk1200Demodulator(audioCapture.sampleRate) { frame -> logAprsFrame("RX", frame) }
+                aprsListenJob = viewModelScope.launch {
+                    try {
+                        audioCapture.audioFlow(settings.audioSource).collect { demodulator.feed(it) }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        fail("Audio input failed: ${e.message}")
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * The timer only repeats what Send does: same text, same location. It never asks the GPS for
+     * anything, and it stops itself on the first failure rather than keying a radio blindly.
+     */
+    private fun setAprsBeaconing(on: Boolean) {
+        aprsBeaconJob?.cancel()
+        aprsBeaconJob = null
+        _uiState.update { it.copy(aprs = it.aprs.copy(isBeaconing = on)) }
+        if (!on) return
+        aprsBeaconJob = viewModelScope.launch {
+            while (isActive && sendAprsBeacon()) {
+                val seconds = _uiState.value.aprs.settings.beaconSeconds
+                    .coerceAtLeast(AprsSettings.MIN_BEACON_SECONDS)
+                delay(seconds * 1000L)
+            }
+            _uiState.update { it.copy(aprs = it.aprs.copy(isBeaconing = false)) }
+        }
+    }
+
+    private fun fillAprsLocationFromGps() {
+        // Marked first: an already-fresh fix can be handed back before requestGpsFix returns.
+        _uiState.update { it.copy(aprs = it.aprs.copy(isLocating = true, status = "Waiting for GPS…")) }
+        val started = settingsRepo.requestGpsFix { latitude, longitude ->
+            // Read the settings when the fix lands, so text typed meanwhile is not thrown away.
+            val settings = _uiState.value.aprs.settings.copy(location = Aprs.formatLocation(latitude, longitude))
+            settingsRepo.updateAprsSettings(settings)
+            _uiState.update { it.copy(aprs = it.aprs.copy(settings = settings, isLocating = false, status = "")) }
+        }
+        if (!started) {
+            _uiState.update { it.copy(aprs = it.aprs.copy(isLocating = false, status = "Location is switched off")) }
         }
     }
 
@@ -579,6 +718,8 @@ class RadarViewModel(
             218.1, 225.7, 233.6, 241.8, 250.3
         )
 
+        private const val APRS_LOG_LINES = 100
+
         fun factory(container: IMainContainer) = viewModelFactory {
             initializer {
                 RadarViewModel(
@@ -591,7 +732,8 @@ class RadarViewModel(
                     trackingService = container.radioTrackingService,
                     audioCapture = container.provideAudioCapture(),
                     saveImage = container.provideSaveImage(),
-                    showToast = container.provideShowToast()
+                    showToast = container.provideShowToast(),
+                    audioOutputs = container::provideAudioOutputs
                 )
             }
         }

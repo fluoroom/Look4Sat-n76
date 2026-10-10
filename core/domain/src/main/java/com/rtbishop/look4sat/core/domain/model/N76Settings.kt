@@ -26,13 +26,21 @@ package com.rtbishop.look4sat.core.domain.model
  * CAT to the radios that actually speak it, and lets the handheld be switched on and off without
  * disturbing a configured CAT rig.
  */
+enum class N76TxPower { High, Medium, Low }
+
 data class N76Settings(
     val enabled: Boolean = false,
     val deviceAddress: String = "",
     val deviceName: String = "",
     val sendSatInfo: Boolean = true,
     val satFirmware: Boolean = true,
-    val pollIntervalMs: Long = 500L,
+    val pollIntervalMs: Long = POLL_DEFAULT_MS,
+    val sendTxPower: Boolean = false,
+    val txPower: N76TxPower = N76TxPower.High,
+    /** Switch the radio's monitor (squelch forced open) on while tracking, and off again on stop. */
+    val openSquelchOnTrack: Boolean = false,
+    /** Hand the radio the station position on connect, so APRS need not wait for its own GPS. */
+    val sendPosition: Boolean = true,
     val forceRxCtcss: Boolean = false,
     val forceRxCtcssHzx100: Int = 0,
     val forceTxCtcss: Boolean = false,
@@ -43,11 +51,15 @@ data class N76Settings(
     val recordMic: Boolean = false,
     val recordSatOnly: Boolean = false,
     val outputFolderUri: String = "",
-    val inputDeviceId: Int = 0
+    val inputDeviceId: Int = 0,
+    /** Boost applied to the phone mic in recordings, to bring it level with the HT audio. */
+    val micGainDb: Int = 0
 ) {
     companion object {
         const val POLL_MIN_MS = 250L
-        const val POLL_MAX_MS = 10_000L
+        const val POLL_MAX_MS = 15_000L
+        const val POLL_DEFAULT_MS = 10_000L
+        val MIC_GAINS_DB = listOf(0, 6, 12, 18, 24)
         val POLL_STEPS_MS = (1..(POLL_MAX_MS / POLL_MIN_MS).toInt()).map { it * POLL_MIN_MS }
 
         /** Standard CTCSS values as Hz × 100. Index 0 is none. */

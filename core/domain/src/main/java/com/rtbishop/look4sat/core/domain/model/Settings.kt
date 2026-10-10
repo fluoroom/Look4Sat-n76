@@ -33,7 +33,9 @@ data class PassesSettings(
     val aosStartMinute: Int = 0,
     val aosEndMinute: Int = 23 * 60 + 59,
     val invertAosTimeWindow: Boolean = false,
-    val categories: List<FilterCategory> = emptyList()
+    val categories: List<FilterCategory> = emptyList(),
+    /** Keep only satellites AMSAT reports as heard, telemetry and beacon-only included. */
+    val onlyAmSatHeard: Boolean = false
 )
 
 /**
@@ -106,8 +108,71 @@ data class OtherSettings(
     val lowElevation: Double = 15.0,
     val highElevation: Double = 45.0,
     val radarCompassOffset: Float = 0f,
-    val radarCompassOffsetElev: Float = 0f
-)
+    val radarCompassOffsetElev: Float = 0f,
+    val autoUpdateIntervalMin: Int = DEFAULT_AUTO_UPDATE_INTERVAL_MIN,
+    /** Take the station position from a fresh GPS fix on pass refresh and on track start. */
+    val stateOfAutoGps: Boolean = false,
+    /** Correct the app clock from the same GPS fix, see AppClock. */
+    val stateOfGpsTime: Boolean = false
+) {
+    companion object {
+        const val DEFAULT_AUTO_UPDATE_INTERVAL_MIN = 24 * 60
+        val AUTO_UPDATE_INTERVALS_MIN = listOf(15, 30, 60, 2 * 60, 6 * 60, 12 * 60, 24 * 60)
+    }
+}
+
+/** How an APRS frame reaches the air. */
+enum class AprsTransport(val label: String) {
+    N76("N76"),
+    BluetoothTnc("BT TNC"),
+    Audio("Audio")
+}
+
+/**
+ * The APRS page, kept as typed. [location] is free text ("lat, lon" or a locator) that only
+ * changes when the user edits it or asks for a GPS fix: nothing here follows the phone around.
+ */
+data class AprsSettings(
+    val callsign: String = "",
+    val message: String = "",
+    val path: String = DEFAULT_PATH,
+    val location: String = "",
+    val transport: AprsTransport = AprsTransport.N76,
+    val tncAddress: String = "",
+    /** Where the audio connection listens; its output follows Android's audio routing. */
+    val audioSource: AudioSource = AudioSource.Mic,
+    /** Android audio device id to transmit on; 0 leaves the choice to the system. */
+    val audioOutputId: Int = 0,
+    /** Symbol table character followed by the symbol code, as APRS sends them. */
+    val symbol: String = DEFAULT_SYMBOL,
+    val beaconSeconds: Int = 60
+) {
+    companion object {
+        const val DEFAULT_PATH = "ARISS,SGATE,WIDE2-2"
+        const val MIN_BEACON_SECONDS = 30
+        const val DEFAULT_SYMBOL = "/y"
+
+        /** The symbols a portable satellite station is likely to want, as code to name. */
+        val SYMBOLS = listOf(
+            "/y" to "Yagi",
+            "/`" to "Dish antenna",
+            "/[" to "Person",
+            "/-" to "House",
+            "/;" to "Portable (tent)",
+            "/>" to "Car",
+            "/j" to "Jeep",
+            "/k" to "Truck",
+            "/b" to "Bicycle",
+            "/s" to "Boat",
+            "/Y" to "Sailboat",
+            "/l" to "Laptop",
+            "/$" to "Phone",
+            "/O" to "Balloon",
+            "/_" to "Weather station",
+            "\\S" to "Satellite"
+        )
+    }
+}
 
 /**
  * Data source URLs (TLE / transceivers) and their per-source enabled flags.

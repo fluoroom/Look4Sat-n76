@@ -29,6 +29,7 @@ import com.rtbishop.look4sat.core.domain.predict.OrbitalPos
 import com.rtbishop.look4sat.core.domain.repository.IMainContainer
 import com.rtbishop.look4sat.core.domain.repository.ISatelliteRepo
 import com.rtbishop.look4sat.core.domain.repository.ISettingsRepo
+import com.rtbishop.look4sat.core.domain.utility.AppClock
 import com.rtbishop.look4sat.core.domain.utility.clipLat
 import com.rtbishop.look4sat.core.domain.utility.clipLon
 import com.rtbishop.look4sat.core.domain.utility.positionToQth
@@ -148,7 +149,7 @@ class MapViewModel(
                 while (isActive) {
                     // Suspends while the map is off-screen instead of predicting into the void
                     isScreenVisible.first { it }
-                    dateNow.time = System.currentTimeMillis()
+                    dateNow.time = AppClock.now()
                     updateMapState(orbitalObject, allSatellites, stationPos, dateNow)
                     delay(effectiveRate.milliseconds)
                 }

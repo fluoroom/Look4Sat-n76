@@ -361,13 +361,13 @@ private fun SortRow(selected: SatStatusSort, onSelect: (SatStatusSort) -> Unit) 
 private fun ratingDetail(sort: SatStatusSort, rating: SatStatusRating?): String? = when (sort) {
     SatStatusSort.Name -> null
     SatStatusSort.LastHeard -> when (val hours = rating?.hoursSinceLastReport) {
-        null -> stringResource(id = R.string.amsat_sort_no_reports)
+        null -> stringResource(id = noUsableReports(rating))
         0 -> stringResource(id = R.string.amsat_sort_recent_now)
         else -> stringResource(id = R.string.amsat_sort_recent_detail, hours)
     }
     SatStatusSort.BestHeard -> {
         val ratio = rating?.heardRatio
-        if (ratio == null) stringResource(id = R.string.amsat_sort_no_reports)
+        if (ratio == null) stringResource(id = noUsableReports(rating))
         else stringResource(
             id = R.string.amsat_sort_best_detail,
             (ratio * 100).roundToInt(),
@@ -375,6 +375,10 @@ private fun ratingDetail(sort: SatStatusSort, rating: SatStatusRating?): String?
         )
     }
 }
+
+/** Tells "reported, but never as heard" apart from "nobody reported on it at all". */
+private fun noUsableReports(rating: SatStatusRating?): Int =
+    if (rating?.trustTier == 1) R.string.amsat_sort_not_heard else R.string.amsat_sort_no_reports
 
 /** Header: satellite name column + fixed-width date labels aligned to tiles. */
 @Composable

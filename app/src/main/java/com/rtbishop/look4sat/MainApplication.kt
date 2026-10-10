@@ -21,6 +21,7 @@ import android.app.Application
 import com.rtbishop.look4sat.core.data.injection.MainContainer
 import com.rtbishop.look4sat.core.domain.repository.IContainerProvider
 import com.rtbishop.look4sat.core.domain.repository.IMainContainer
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -35,20 +36,37 @@ class MainApplication : Application(), IContainerProvider {
     override fun onCreate() {
         super.onCreate()
         container = MainContainer(this)
-        // trigger automatic update every 48 hours
-        container.appScope.launch { checkAutoUpdate() }
+        // trigger automatic update once the chosen interval has passed, for as long as the app lives
+        container.appScope.launch {
+            while (true) {
+                checkAutoUpdate()
+                delay(AUTO_UPDATE_CHECK_MS)
+            }
+        }
+        // position and clock from GPS, for those who opted in
+        container.settingsRepo.syncWithGps()
         // load satellite data on every app start
         container.appScope.launch { container.satelliteRepo.initRepository() }
     }
 
+    private var lastUpdateAttempt = 0L
+
     private suspend fun checkAutoUpdate(timeNow: Long = System.currentTimeMillis()) {
-        if (container.settingsRepo.otherSettings.value.stateOfAutoUpdate) {
-            val timeDelta = timeNow - container.settingsRepo.databaseState.value.updateTimestamp
-            if (timeDelta > 172_800_000L) { // 48 hours in ms
-                val sdf = SimpleDateFormat("d MMM yyyy - HH:mm:ss", Locale.getDefault())
-                println("Started periodic data update on ${sdf.format(Date())}")
-                container.databaseRepo.updateFromRemote()
-            }
+        val settings = container.settingsRepo.otherSettings.value
+        if (!settings.stateOfAutoUpdate) return
+        val intervalMs = settings.autoUpdateIntervalMin * 60_000L
+        // A failed update leaves the stored timestamp alone, so the last attempt counts as well:
+        // offline, this retries once per interval instead of once per check.
+        val lastUpdate = maxOf(container.settingsRepo.databaseState.value.updateTimestamp, lastUpdateAttempt)
+        if (timeNow - lastUpdate > intervalMs) {
+            lastUpdateAttempt = timeNow
+            val sdf = SimpleDateFormat("d MMM yyyy - HH:mm:ss", Locale.getDefault())
+            println("Started periodic data update on ${sdf.format(Date())}")
+            container.databaseRepo.updateFromRemote()
         }
+    }
+
+    private companion object {
+        const val AUTO_UPDATE_CHECK_MS = 60_000L
     }
 }

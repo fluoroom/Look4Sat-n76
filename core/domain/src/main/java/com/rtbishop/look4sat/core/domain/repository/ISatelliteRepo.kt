@@ -55,7 +55,8 @@ interface ISatelliteRepo {
         aosStartMinute: Int,
         aosEndMinute: Int,
         invertAosTimeWindow: Boolean,
-        categories: List<FilterCategory>
+        categories: List<FilterCategory>,
+        onlyAmSatHeard: Boolean
     )
 
     /** Get the current position of a single satellite. */

@@ -19,6 +19,7 @@ package com.rtbishop.look4sat.core.domain.utility
 
 import com.rtbishop.look4sat.core.domain.model.SatReport
 import com.rtbishop.look4sat.core.domain.model.SatStatus
+import com.rtbishop.look4sat.core.domain.model.SatStatusPage
 
 /** Ordering offered by the AMSAT status list. */
 enum class SatStatusSort { Name, LastHeard, BestHeard }
@@ -31,20 +32,32 @@ const val STATUS_SLOT_HOURS = 2
  *
  * "Not Heard" and conflicting reports are deliberately left out of the count: they are often
  * filed for a pass that was never going to work, so counting them would punish a healthy
- * satellite for its observers' luck rather than for its own payload.
+ * satellite for its observers' luck rather than for its own payload. For the same reason they
+ * are no evidence of when a satellite was last heard, so they earn it nothing but a place just
+ * above the satellites nobody reported on at all, see [trustTier].
  */
 data class SatStatusRating(
     val heard: Int,
     val telemetryOnly: Int,
-    /** Index of the newest slot holding any report; -1 when the satellite has none at all. */
-    val freshnessRank: Int
+    /** Index of the newest slot holding a heard or telemetry report; -1 when there is none. */
+    val freshnessRank: Int,
+    /** Index of the newest slot holding a report of any kind; -1 when the satellite has none. */
+    val anyReportRank: Int = freshnessRank
 ) {
     val sampleCount: Int get() = heard + telemetryOnly
+
+    /** 2 = heard or telemetry on record, 1 = reported on but never heard, 0 = no data. */
+    val trustTier: Int
+        get() = when {
+            sampleCount > 0 -> 2
+            anyReportRank >= 0 -> 1
+            else -> 0
+        }
 
     /** Share of usable reports that were voice-grade. Null when nothing usable came in. */
     val heardRatio: Double? get() = if (sampleCount == 0) null else heard.toDouble() / sampleCount
 
-    /** Hours since the newest report, rounded down to the slot grid; null when never reported. */
+    /** Hours since it was last heard, rounded down to the slot grid; null when it never was. */
     val hoursSinceLastReport: Int? get() = if (freshnessRank < 0) null else freshnessRank * STATUS_SLOT_HOURS
 
     /**
@@ -60,18 +73,20 @@ fun SatStatus.rate(reports: Map<String, SatReport>): SatStatusRating {
     val slots = days.flatMap { it.slots }
     var heard = 0
     var telemetryOnly = 0
-    for (slot in slots) {
+    var freshnessRank = -1
+    slots.forEachIndexed { index, slot ->
         for (id in slot.reportIds) {
             val text = reports[id]?.statusText ?: continue
             when (categoryOfReport(text)) {
                 SatStatusCategory.Active -> heard++
                 SatStatusCategory.TelemetryOnly -> telemetryOnly++
                 // "Not Heard" and conflicting reports stay out of the count, see SatStatusRating.
-                SatStatusCategory.NotHeard, SatStatusCategory.Conflicting -> Unit
+                SatStatusCategory.NotHeard, SatStatusCategory.Conflicting -> continue
             }
+            if (freshnessRank < 0) freshnessRank = index
         }
     }
-    return SatStatusRating(heard, telemetryOnly, slots.indexOfFirst { it.count > 0 })
+    return SatStatusRating(heard, telemetryOnly, freshnessRank, slots.indexOfFirst { it.count > 0 })
 }
 
 /**
@@ -81,6 +96,9 @@ fun SatStatus.rate(reports: Map<String, SatReport>): SatStatusRating {
  * Anything unrecognised is [Conflicting], matching the deep-orange bucket the AMSAT site uses.
  */
 enum class SatStatusCategory { Active, TelemetryOnly, NotHeard, Conflicting }
+
+/** The kinds that prove a satellite is alive: voice-grade, or at least a telemetry beacon. */
+val HEARD_CATEGORIES = setOf(SatStatusCategory.Active, SatStatusCategory.TelemetryOnly)
 
 /** Classifies one report's status text. Mirrors the colouring in the data layer. */
 fun categoryOfReport(text: String): SatStatusCategory = when {
@@ -112,24 +130,54 @@ fun List<SatStatus>.filteredByCategories(
     return filter { status -> status.categories(reports).any { it in selected } }
 }
 
+/** Designators (see [AmSatNameMatch]) of the satellites reported with at least one of [selected]. */
+fun SatStatusPage.amSatKeysReportedAs(selected: Set<SatStatusCategory>): Set<String> =
+    statuses.filter { status -> status.categories(reports).any { it in selected } }
+        .flatMapTo(HashSet()) { AmSatNameMatch.amSatKeys(it.name) }
+
 /**
- * Orders the list for display. Satellites with nothing to go on sink to the bottom of the
- * data-driven orderings rather than floating to the top on an empty score.
+ * The strongest thing reported about each of [satelliteNames] (orbital-data names): heard beats
+ * telemetry only, which beats not heard. A satellite AMSAT says nothing usable about is left out.
+ */
+fun SatStatusPage.bestCategories(satelliteNames: Collection<String>): Map<String, SatStatusCategory> {
+    val ranked = listOf(SatStatusCategory.Active, SatStatusCategory.TelemetryOnly, SatStatusCategory.NotHeard)
+    val reported = statuses.mapNotNull { status ->
+        val kinds = status.categories(reports)
+        val best = ranked.firstOrNull { it in kinds } ?: return@mapNotNull null
+        AmSatNameMatch.amSatKeys(status.name) to best
+    }
+    val result = HashMap<String, SatStatusCategory>()
+    for (name in satelliteNames.toSet()) {
+        // AMSAT lists some satellites once per payload ("ISS-FM", "ISS-DATA"): take the best of them.
+        val keys = AmSatNameMatch.satelliteKeys(name)
+        reported.filter { (amSatKeys, _) -> keys.any { it in amSatKeys } }
+            .minByOrNull { (_, category) -> ranked.indexOf(category) }
+            ?.let { (_, category) -> result[name] = category }
+    }
+    return result
+}
+
+/**
+ * Orders the list for display. The data-driven orderings rank by [SatStatusRating.trustTier]
+ * first: satellites that were heard, then the ones only ever reported as not heard, then the
+ * ones with no data, so neither of the last two floats to the top on an empty score.
  */
 fun List<SatStatus>.sortedForDisplay(
     sort: SatStatusSort,
     ratings: Map<String, SatStatusRating>
 ): List<SatStatus> {
     val byName = compareBy<SatStatus> { it.name.lowercase() }
+    val byTrustTier = compareByDescending<SatStatus> { ratings[it.name]?.trustTier ?: 0 }
     return when (sort) {
         SatStatusSort.Name -> sortedWith(byName)
         SatStatusSort.LastHeard -> sortedWith(
-            // -1 means "never reported": map it past every real rank instead of ahead of them.
-            compareBy<SatStatus> { ratings[it.name]?.freshnessRank?.takeIf { rank -> rank >= 0 } ?: Int.MAX_VALUE }
+            byTrustTier
+                // -1 means "never heard": map it past every real rank instead of ahead of them.
+                .thenBy { ratings[it.name]?.freshnessRank?.takeIf { rank -> rank >= 0 } ?: Int.MAX_VALUE }
                 .then(byName)
         )
         SatStatusSort.BestHeard -> sortedWith(
-            compareByDescending<SatStatus> { ratings[it.name]?.sampleCount?.coerceAtMost(1) ?: 0 }
+            byTrustTier
                 .thenByDescending { ratings[it.name]?.rankingScore ?: 0.0 }
                 .thenByDescending { ratings[it.name]?.sampleCount ?: 0 }
                 .then(byName)

@@ -20,6 +20,10 @@ package com.rtbishop.look4sat.core.data.framework
 import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.util.Log
+import com.rtbishop.look4sat.core.domain.aprs.Kiss
+import com.rtbishop.look4sat.core.domain.aprs.KissDecoder
+import com.rtbishop.look4sat.core.domain.model.AprsSettings
+import com.rtbishop.look4sat.core.domain.model.AprsTransport
 import com.rtbishop.look4sat.core.domain.model.BluetoothAddress
 import com.rtbishop.look4sat.core.domain.model.N76Settings
 import com.rtbishop.look4sat.core.domain.model.RadioControlSettings
@@ -32,16 +36,21 @@ import com.rtbishop.look4sat.core.domain.repository.ISatelliteRepo
 import com.rtbishop.look4sat.core.domain.repository.ISettingsRepo
 import com.rtbishop.look4sat.core.domain.repository.N76RuntimeState
 import com.rtbishop.look4sat.core.domain.repository.RadioTrackingState
+import com.rtbishop.look4sat.core.domain.utility.AppClock
 import com.rtbishop.look4sat.core.domain.utility.TransponderMapper
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.roundToInt
 
 class RadioTrackingService(
@@ -57,6 +66,10 @@ class RadioTrackingService(
     private val INIT_STEP_DELAY_MS = 200L
     private val _state = MutableStateFlow(RadioTrackingState())
     override val state: StateFlow<RadioTrackingState> = _state
+
+    // Declared ahead of the links below, whose callbacks emit into it.
+    private val _aprsReceived = MutableSharedFlow<ByteArray>(extraBufferCapacity = 32)
+    override val aprsReceived: SharedFlow<ByteArray> = _aprsReceived
 
     private val _n76State = MutableStateFlow(
         N76RuntimeState(
@@ -81,13 +94,24 @@ class RadioTrackingService(
     private var txController: IRadioController? = null
     private var rxController: IRadioController? = null
     private var trackingJob: Job? = null
+    private var n76PositionJob: Job? = null
+    // A KISS TNC is a plain serial link, which is all N76Bluetooth is underneath its name.
+    private val tncDecoder = KissDecoder()
+    private val tnc = N76Bluetooth(bluetoothManager.adapter).apply {
+        onLog = { Log.d("AprsTnc", it) }
+        onBytes = { bytes, count -> tncDecoder.feed(bytes, count).forEach { _aprsReceived.tryEmit(it) } }
+    }
+    private var tncAddress = ""
+    private val aprsAudio = AprsAudioPlayer(context)
     private var n76SatActive = false
+    private var lastN76SatLog = ""
 
     // ── Connection ──────────────────────────────────────────────────────────
 
     override suspend fun connectRadios() {
         txController?.disconnect()
         rxController?.disconnect()
+        n76PositionJob?.cancel()
         n76Link.disconnect()
         n76SatActive = false
 
@@ -125,6 +149,7 @@ class RadioTrackingService(
                     errorMessage = if (!ok) "Could not connect to N76 ($n76Addr)" else null
                 )
             }
+            if (ok) startN76PositionFeed()
             return
         }
 
@@ -181,6 +206,7 @@ class RadioTrackingService(
 
     override suspend fun disconnectRadios() {
         stopTracking()
+        n76PositionJob?.cancel()
         n76Link.disconnect()
         n76SatActive = false
         txController?.disconnect()
@@ -203,6 +229,8 @@ class RadioTrackingService(
             )
         }
         trackingJob?.cancel()
+        // A track is where a second of clock error turns into Doppler error, so sync before it.
+        settingsRepo.syncWithGps()
 
         val rcSettings = settingsRepo.radioControlSettings.value
         val isN76      = settingsRepo.n76Settings.value.enabled
@@ -264,7 +292,7 @@ class RadioTrackingService(
             val xpdr    = currentState.selectedTransponder ?: break
             var txBaseFreq = currentState.txBaseFrequencyHz
             val stationPos = settingsRepo.stationPosition.value
-            val pos = satelliteRepo.getPosition(satPass.orbitalObject, stationPos, System.currentTimeMillis())
+            val pos = satelliteRepo.getPosition(satPass.orbitalObject, stationPos, AppClock.now())
             val txNow = txController
             val rxNow = rxController
             val v = pos.distanceRate * 1000.0
@@ -446,7 +474,7 @@ class RadioTrackingService(
             val xpdr    = currentState.selectedTransponder ?: break
             var txBaseFreq = currentState.txBaseFrequencyHz
             val stationPos = settingsRepo.stationPosition.value
-            val pos = satelliteRepo.getPosition(satPass.orbitalObject, stationPos, System.currentTimeMillis())
+            val pos = satelliteRepo.getPosition(satPass.orbitalObject, stationPos, AppClock.now())
             val v = pos.distanceRate * 1000.0
 
             if (tuningRadio.isNotEmpty()) {
@@ -548,6 +576,7 @@ class RadioTrackingService(
             n76Link.exitSatMode()
             n76SatActive = false
         }
+        n76Link.setSquelchOpen(false)
         val n76 = settingsRepo.n76Settings.value
         if (n76.recordSatOnly && n76Link.isRecording) n76Link.stopRecording()
         _state.update { it.copy(isActive = false) }
@@ -634,6 +663,49 @@ class RadioTrackingService(
         }
     }
 
+    override suspend fun sendAprs(frame: ByteArray, settings: AprsSettings): String? =
+        when (settings.transport) {
+            // The radio builds and sends the beacon itself, from the APRS settings stored in it.
+            AprsTransport.N76 -> when {
+                !settingsRepo.n76Settings.value.enabled -> "Enable the N76 in Settings first"
+                !n76Link.sendLocationBeacon() -> "N76 is not connected"
+                else -> null
+            }
+            AprsTransport.BluetoothTnc -> sendToTnc(Kiss.dataFrame(frame), BluetoothAddress.normalize(settings.tncAddress))
+            AprsTransport.Audio -> try {
+                aprsAudio.play(frame, settings.audioOutputId)
+                null
+            } catch (e: IllegalStateException) {
+                "Audio output failed: ${e.message}"
+            } catch (e: UnsupportedOperationException) {
+                "Audio output failed: ${e.message}"
+            }
+        }
+
+    private suspend fun sendToTnc(kiss: ByteArray, address: String): String? =
+        connectTnc(address) ?: if (tnc.send(kiss)) null else "Could not write to the TNC"
+
+    override suspend fun startAprsReceive(settings: AprsSettings): String? = when (settings.transport) {
+        AprsTransport.N76 -> "The N76 does not pass received packets to the app"
+        AprsTransport.BluetoothTnc -> connectTnc(BluetoothAddress.normalize(settings.tncAddress))
+        AprsTransport.Audio -> null
+    }
+
+    /** Connects on first use and stays connected, so a beacon timer does not reconnect every time. */
+    private suspend fun connectTnc(address: String): String? {
+        if (!BluetoothAddress.isValid(address)) return "Set a valid TNC Bluetooth address"
+        if (!tnc.isConnected || address != this.tncAddress) {
+            tnc.disconnect()
+            this.tncAddress = address
+            val connected = CompletableDeferred<Unit>()
+            tnc.onConnected = { connected.complete(Unit) }
+            tnc.connect(address)
+            withTimeoutOrNull(TNC_CONNECT_TIMEOUT_MS) { connected.await() }
+                ?: return "Could not connect to the TNC ($address)"
+        }
+        return null
+    }
+
     override fun setN76Monitor(on: Boolean) {
         n76Link.setMonitor(on)
         _n76State.update { it.copy(monitorOn = on) }
@@ -643,7 +715,12 @@ class RadioTrackingService(
     override fun startN76Recording() {
         val settings = settingsRepo.n76Settings.value
         val satName = _state.value.currentPass?.name.orEmpty()
-        n76Link.startRecording(settings, satName)
+        // Called straight from a button press: a failure here must end in the log, not a crash.
+        try {
+            n76Link.startRecording(settings, satName)
+        } catch (e: Exception) {
+            n76Link.onLog?.invoke("rec: could not start (${e.message ?: e.javaClass.simpleName})")
+        }
     }
 
     override fun stopN76Recording() {
@@ -662,7 +739,30 @@ class RadioTrackingService(
         n76Link.stopPlayback()
     }
 
+    /**
+     * Gives the radio the station position right away and again whenever it changes, so APRS has
+     * a position before the radio's own GPS finds one. A fresh phone fix is asked for as well; it
+     * arrives through the same flow when Auto GPS is on.
+     */
+    private fun startN76PositionFeed() {
+        settingsRepo.syncWithGps()
+        n76PositionJob = appScope.launch {
+            settingsRepo.stationPosition.collect { pos ->
+                val n76 = settingsRepo.n76Settings.value
+                // Timestamp 0 is the never-set default (0°, 0°), which must not reach the air.
+                if (!n76.sendPosition || pos.timestamp == 0L || !n76Link.isConnected) return@collect
+                n76Link.send(
+                    N76Protocol.positionPacket(
+                        pos.latitude, pos.longitude, pos.altitude, AppClock.now() / 1000L, n76.satFirmware
+                    )
+                )
+                n76Link.onLog?.invoke("pos: sent ${pos.latitude}, ${pos.longitude} (${pos.qthLocator})")
+            }
+        }
+    }
+
     private suspend fun runN76Tracking() {
+        lastN76SatLog = ""
         val n76 = settingsRepo.n76Settings.value
         val satName = _state.value.currentPass?.name.orEmpty()
         if (n76.recordSatOnly && (n76.recordHt || n76.recordMic)) {
@@ -676,7 +776,7 @@ class RadioTrackingService(
                 val xpdr = currentState.selectedTransponder ?: break
                 val txBaseFreq = currentState.txBaseFrequencyHz
                 val stationPos = settingsRepo.stationPosition.value
-                val pos = satelliteRepo.getPosition(satPass.orbitalObject, stationPos, System.currentTimeMillis())
+                val pos = satelliteRepo.getPosition(satPass.orbitalObject, stationPos, AppClock.now())
                 val txRadioFreq = txBaseFreq?.let { pos.getUplinkFreq(it) }
                 val rxBaseFreq = if (txBaseFreq != null) {
                     TransponderMapper.mapUplinkToDownlink(txBaseFreq, xpdr)
@@ -684,8 +784,12 @@ class RadioTrackingService(
                 val rxRadioFreq = rxBaseFreq?.let { pos.getDownlinkFreq(it) }
                 val live = settingsRepo.n76Settings.value
 
+                // Every tick, so switching the option mid-track takes effect; a no-op otherwise.
+                n76Link.setSquelchOpen(live.openSquelchOnTrack)
                 if (live.sendSatInfo && n76Link.isConnected) {
                     sendN76Packets(satPass, pos.azimuth, pos.elevation, pos.distance, pos.altitude, txRadioFreq, rxRadioFreq)
+                } else {
+                    logN76Sat(if (live.sendSatInfo) "sat: not sent, N76 not connected" else "sat: not sent, \"Send sat info\" is off")
                 }
 
                 _state.update {
@@ -706,6 +810,9 @@ class RadioTrackingService(
                 n76Link.exitSatMode()
                 n76SatActive = false
             }
+            // Also here: a tick already under way when the job was cancelled may have switched
+            // the monitor back on after stopTracking switched it off.
+            n76Link.setSquelchOpen(false)
             if (n76.recordSatOnly) n76Link.stopRecording()
         }
     }
@@ -727,13 +834,14 @@ class RadioTrackingService(
                 n76Link.exitSatMode()
                 n76SatActive = false
             }
+            logN76Sat("sat: not sent, RX $rx Hz / TX $tx Hz is outside 136-520 MHz")
             return
         }
         val tone = _state.value.ctcssTone
         val defaultSub = if (tone != null && tone > 0) (tone * 100).roundToInt() else 0
         val rxSub = if (n76.forceRxCtcss) n76.forceRxCtcssHzx100 else defaultSub
         val txSub = if (n76.forceTxCtcss) n76.forceTxCtcssHzx100 else defaultSub
-        val nowMs = System.currentTimeMillis()
+        val nowMs = AppClock.now()
         val aosSec = if (pass.aosTime > 0) {
             ((pass.aosTime - nowMs) / 1000L).toInt().coerceIn(0, 65534)
         } else 65535
@@ -747,8 +855,23 @@ class RadioTrackingService(
                 aos = aosSec
             )
         )
-        n76Link.send(N76Protocol.freqModePacket(rx, tx, rxSub, txSub, n76.satFirmware))
+        val txPower = if (n76.sendTxPower) N76Protocol.txPowerLevel(n76.txPower) else N76Protocol.TX_POWER_NO_CHANGE
+        n76Link.send(N76Protocol.freqModePacket(rx, tx, rxSub, txSub, n76.satFirmware, txPower))
         n76SatActive = true
+        logN76Sat("sat: sending RX $rx Hz / TX $tx Hz, ${if (n76.satFirmware) "sat firmware (16 B)" else "legacy firmware (14 B)"}")
+    }
+
+    /** Says in the N76 log what the tracker is doing with satellite mode, once per change. */
+    private fun logN76Sat(line: String) {
+        // Frequencies drift with Doppler every tick; only a change of situation is worth a line.
+        val situation = line.substringBefore(" RX ")
+        if (situation == lastN76SatLog) return
+        lastN76SatLog = situation
+        n76Link.onLog?.invoke(line)
+    }
+
+    private companion object {
+        const val TNC_CONNECT_TIMEOUT_MS = 15_000L
     }
 
     private fun isValidN76Freq(hz: Long) = hz == 0L || hz in 136_000_000L..520_000_000L

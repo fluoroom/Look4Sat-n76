@@ -17,15 +17,33 @@
  */
 package com.rtbishop.look4sat.core.data.framework
 
+import com.rtbishop.look4sat.core.domain.model.N76TxPower
+import java.nio.ByteBuffer
 import java.nio.charset.Charset
+import kotlin.math.roundToInt
 
 object N76Protocol {
     private const val VENDOR = 0x0002
+    const val CMD_SET_POSITION = 0x0020
     const val CMD_READ_BSS_SETTINGS = 0x0021
     const val CMD_WRITE_BSS_SETTINGS = 0x0022
     const val CMD_FREQ_MODE_SET_PAR = 0x0023
     const val CMD_SET_SATELLITE_INFO = 0x004D
     const val CMD_DO_PROG_FUNC = 0x0042
+
+    /** txPowerLevel value that leaves the radio's own power setting alone. */
+    const val TX_POWER_NO_CHANGE = 0
+
+    /**
+     * txPowerLevel for [power]. bt-docs only defines 0 (no change) for this 2-bit field; the
+     * ascending order here is a reading of it that has yet to be confirmed on the radio. If the
+     * radio's power indicator disagrees, this mapping is the one place to fix.
+     */
+    fun txPowerLevel(power: N76TxPower): Int = when (power) {
+        N76TxPower.Low -> 1
+        N76TxPower.Medium -> 2
+        N76TxPower.High -> 3
+    }
 
     fun buildPacket(cmd: Int, payload: ByteArray): ByteArray {
         val out = ByteArray(8 + payload.size)
@@ -51,7 +69,8 @@ object N76Protocol {
         txFreqHz: Long,
         rxSubtone: Int = 0,
         txSubtone: Int = 0,
-        satFirmware: Boolean = true
+        satFirmware: Boolean = true,
+        txPowerLevel: Int = TX_POWER_NO_CHANGE
     ): ByteArray {
         val w = BigEndianBitWriter(if (satFirmware) 16 else 14)
         w.write(0, 2, 0)
@@ -70,7 +89,7 @@ object N76Protocol {
             w.write(3, 4, 100)
         }
         w.write(0, 6, 104)
-        w.write(0, 2, 110)
+        w.write(txPowerLevel, 2, 110)
         return w.bytes
     }
 
@@ -99,8 +118,14 @@ object N76Protocol {
         return w.bytes
     }
 
-    fun freqModePacket(rxHz: Long, txHz: Long, rxSub: Int, txSub: Int, satFw: Boolean) =
-        buildPacket(CMD_FREQ_MODE_SET_PAR, buildFreqModeParam(rxHz, txHz, rxSub, txSub, satFw))
+    fun freqModePacket(
+        rxHz: Long,
+        txHz: Long,
+        rxSub: Int,
+        txSub: Int,
+        satFw: Boolean,
+        txPowerLevel: Int = TX_POWER_NO_CHANGE
+    ) = buildPacket(CMD_FREQ_MODE_SET_PAR, buildFreqModeParam(rxHz, txHz, rxSub, txSub, satFw, txPowerLevel))
 
     fun satInfoPacket(name: String, az: Int, el: Int, dist: Int, alt: Int, aos: Int) =
         buildPacket(CMD_SET_SATELLITE_INFO, buildSatelliteInfo(name, az, el, dist, alt, aos))
@@ -109,6 +134,43 @@ object N76Protocol {
 
     fun pttAssert() = buildPacket(CMD_DO_PROG_FUNC, byteArrayOf(0x00, 0x0D))
     fun pttRelease() = buildPacket(CMD_DO_PROG_FUNC, byteArrayOf(0x00, 0x1A))
+
+    /** Action 15, toggle_monitor: flips the radio's monitor, which forces the squelch open. */
+    fun toggleMonitor() = buildPacket(CMD_DO_PROG_FUNC, byteArrayOf(0x00, 0x0F))
+
+    /** Action 19, sendLocation: the radio transmits its own APRS position beacon. */
+    fun sendLocation() = buildPacket(CMD_DO_PROG_FUNC, byteArrayOf(0x00, 0x13))
+
+    /**
+     * SET_POSITION payload (cmd 0x0020), all fields big-endian.
+     * Latitude and longitude are signed 24-bit, in degrees × 60 × 500. The long form (fw ≥ 133)
+     * adds altitude (m), speed and bearing (both sent as -1, unknown), the fix time in Unix
+     * seconds and accuracy (0, unknown): 18 bytes against the short form's 6.
+     */
+    fun buildPosition(
+        latitudeDeg: Double,
+        longitudeDeg: Double,
+        altitudeM: Double,
+        epochSeconds: Long,
+        longFormat: Boolean = true
+    ): ByteArray {
+        val buf = ByteBuffer.allocate(if (longFormat) 18 else 6)
+        for (degrees in doubleArrayOf(latitudeDeg, longitudeDeg)) {
+            val scaled = (degrees * 60 * 500).roundToInt()
+            buf.put((scaled shr 16).toByte()).put((scaled shr 8).toByte()).put(scaled.toByte())
+        }
+        if (longFormat) {
+            buf.putShort(altitudeM.roundToInt().coerceIn(-32767, 32767).toShort())
+            buf.putShort(-1)
+            buf.putShort(-1)
+            buf.putInt(epochSeconds.toInt())
+            buf.putShort(0)
+        }
+        return buf.array()
+    }
+
+    fun positionPacket(latDeg: Double, lonDeg: Double, altM: Double, epochSeconds: Long, longFormat: Boolean) =
+        buildPacket(CMD_SET_POSITION, buildPosition(latDeg, lonDeg, altM, epochSeconds, longFormat))
 }
 
 class BigEndianBitWriter(val size: Int) {

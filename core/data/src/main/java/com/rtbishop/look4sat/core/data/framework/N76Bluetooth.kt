@@ -41,6 +41,8 @@ class N76Bluetooth(private val adapter: BluetoothAdapter?) {
     var onLog: ((String) -> Unit)? = null
     var onConnected: (() -> Unit)? = null
     var onPacket: ((ByteArray) -> Unit)? = null
+    /** Every received chunk as it came, for links that do not speak the N76's framing. */
+    var onBytes: ((ByteArray, Int) -> Unit)? = null
     val isConnected get() = _connected.get()
 
     fun connect(mac: String) {
@@ -122,6 +124,7 @@ class N76Bluetooth(private val adapter: BluetoothAdapter?) {
                 while (true) {
                     val n = stream.read(chunk)
                     if (n <= 0) break
+                    try { onBytes?.invoke(chunk, n) } catch (_: Exception) {}
                     buf += chunk.copyOf(n)
                     var i = 0
                     while (i < buf.size) {

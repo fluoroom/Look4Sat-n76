@@ -17,9 +17,11 @@
  */
 package com.rtbishop.look4sat.core.domain.repository
 
+import com.rtbishop.look4sat.core.domain.model.AprsSettings
 import com.rtbishop.look4sat.core.domain.model.SatRadio
 import com.rtbishop.look4sat.core.domain.predict.OrbitalObject
 import com.rtbishop.look4sat.core.domain.predict.OrbitalPass
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 
 data class N76RuntimeState(
@@ -65,6 +67,21 @@ interface IRadioTrackingService {
     fun setCtcssTone(toneHz: Double?)
     fun setMode(txMode: String, rxMode: String)
     fun setPtt(on: Boolean)
+    /** AX.25 frames heard by the Bluetooth TNC, as they arrive. */
+    val aprsReceived: SharedFlow<ByteArray>
+
+    /**
+     * Transmits once. A TNC or the audio output is handed [frame] (AX.25, no flags, no FCS); the
+     * N76 ignores it and is asked to send its own beacon, from the APRS settings stored in it.
+     * Returns null once handed over, else why not.
+     */
+    suspend fun sendAprs(frame: ByteArray, settings: AprsSettings): String?
+
+    /**
+     * Starts passing on what [settings]' connection hears, which means connecting the Bluetooth
+     * TNC. Null on success. Audio is decoded by the caller; the N76 has nothing to pass on.
+     */
+    suspend fun startAprsReceive(settings: AprsSettings): String?
     fun setN76Monitor(on: Boolean)
     fun startN76Recording()
     fun stopN76Recording()

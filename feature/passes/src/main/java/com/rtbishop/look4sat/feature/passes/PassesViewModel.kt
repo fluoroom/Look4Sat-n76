@@ -24,10 +24,14 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.rtbishop.look4sat.core.domain.model.FilterCategory
 import com.rtbishop.look4sat.core.domain.predict.CelestialComputer
 import com.rtbishop.look4sat.core.domain.predict.OrbitalPass
+import com.rtbishop.look4sat.core.domain.repository.IAmSatRepository
 import com.rtbishop.look4sat.core.domain.repository.IMainContainer
 import com.rtbishop.look4sat.core.domain.repository.ISatelliteRepo
 import com.rtbishop.look4sat.core.domain.repository.ISettingsRepo
+import com.rtbishop.look4sat.core.domain.utility.AppClock
+import com.rtbishop.look4sat.core.domain.utility.bestCategories
 import com.rtbishop.look4sat.core.presentation.getDefaultPass
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -54,8 +58,11 @@ private data class PassesInput(
 
 class PassesViewModel(
     private val satelliteRepo: ISatelliteRepo,
-    private val settingsRepo: ISettingsRepo
+    private val settingsRepo: ISettingsRepo,
+    private val amSatRepo: IAmSatRepository
 ) : ViewModel() {
+
+    private var amSatJob: Job? = null
 
     private val defaultPass = getDefaultPass()
     private val _uiState = MutableStateFlow(
@@ -71,12 +78,13 @@ class PassesViewModel(
             invertAosTimeWindow = settingsRepo.passesSettings.value.invertAosTimeWindow,
             showDeepSpace = settingsRepo.passesSettings.value.showDeepSpace,
             categories = settingsRepo.passesSettings.value.categories,
+            onlyAmSatHeard = settingsRepo.passesSettings.value.onlyAmSatHeard,
             shouldSeeWhatsNew = settingsRepo.otherSettings.value.shouldSeeWhatsNew
         )
     )
     val uiState: StateFlow<PassesState> = _uiState
 
-    private val _timeNow = MutableStateFlow(System.currentTimeMillis())
+    private val _timeNow = MutableStateFlow(AppClock.now())
 
     private val searchQuery = MutableStateFlow("")
 
@@ -113,8 +121,10 @@ class PassesViewModel(
             }
         }
         viewModelScope.launch {
-            settingsRepo.passesSettings.map { it.categories }.distinctUntilChanged()
-                .collectLatest { categories -> _uiState.update { it.copy(categories = categories) } }
+            settingsRepo.passesSettings.map { it.categories to it.onlyAmSatHeard }.distinctUntilChanged()
+                .collectLatest { (categories, onlyAmSatHeard) ->
+                    _uiState.update { it.copy(categories = categories, onlyAmSatHeard = onlyAmSatHeard) }
+                }
         }
         // Tick loop, gated on having an observer so it stops while the screen is in the
         // background. Restarts on passes, UTC or DeepSpace changes. Sun times and grouping are
@@ -138,10 +148,11 @@ class PassesViewModel(
                                 if (showDeepSpace) allPasses else allPasses.filter { !it.isDeepSpace },
                                 query
                             )
+                            refreshAmSatStatus(filtered)
                             val sunTimes = computeSunTimes(filtered, isUtc)
                             var live: List<OrbitalPass>? = null
                             while (isActive) {
-                                val timeNow = System.currentTimeMillis()
+                                val timeNow = AppClock.now()
                                 _timeNow.value = timeNow
                                 val current = filtered.filter { it.isDeepSpace || timeNow < it.losTime }
                                 // Only a pass dropping off the list warrants a regroup
@@ -178,7 +189,7 @@ class PassesViewModel(
                     invertAosTimeWindow = action.invertAosTimeWindow,
                     showDeepSpace = action.showDeepSpace
                 )
-            is PassesAction.FilterTransponders -> setTransponderFilter(action.categories)
+            is PassesAction.FilterTransponders -> setTransponderFilter(action.categories, action.onlyAmSatHeard)
             PassesAction.RefreshPasses -> refreshPasses()
             PassesAction.TogglePassesDialog ->
                 _uiState.update { it.copy(isPassesDialogShown = !it.isPassesDialogShown) }
@@ -188,6 +199,19 @@ class PassesViewModel(
                 searchQuery.value = action.query
                 _uiState.update { it.copy(searchQuery = action.query) }
             }
+        }
+    }
+
+    /**
+     * Looks up the AMSAT status of the listed satellites on the side, so a slow or absent network
+     * never holds the pass list back. Without a page the icons simply stay on "no data".
+     */
+    private fun refreshAmSatStatus(passes: List<OrbitalPass>) {
+        amSatJob?.cancel()
+        amSatJob = viewModelScope.launch {
+            val page = amSatRepo.recentStatus() ?: return@launch
+            val status = page.bestCategories(passes.map { it.name })
+            _uiState.update { it.copy(amSatStatus = status) }
         }
     }
 
@@ -216,7 +240,7 @@ class PassesViewModel(
         val result = LinkedHashMap<String, Pair<String, String>>()
         // DeepSpace group always shows today's sun times
         if (passes.any { it.isDeepSpace }) {
-            val riseSet = CelestialComputer.findSunRiseSet(stationPos, System.currentTimeMillis())
+            val riseSet = CelestialComputer.findSunRiseSet(stationPos, AppClock.now())
             val rise = if (riseSet.riseTimeMillis > 0) sdfTime.format(Date(riseSet.riseTimeMillis)) else "--:--"
             val set = if (riseSet.setTimeMillis > 0) sdfTime.format(Date(riseSet.setTimeMillis)) else "--:--"
             result["DeepSpace (period >225min)"] = rise to set
@@ -308,23 +332,28 @@ class PassesViewModel(
         }
     }
 
-    private fun setTransponderFilter(categories: List<FilterCategory>) = viewModelScope.launch {
-        settingsRepo.setPassesSettings(
-            settingsRepo.passesSettings.value.copy(categories = categories)
-        )
-        _uiState.update { it.copy(categories = categories) }
-    }
+    private fun setTransponderFilter(categories: List<FilterCategory>, onlyAmSatHeard: Boolean) =
+        viewModelScope.launch {
+            settingsRepo.setPassesSettings(
+                settingsRepo.passesSettings.value.copy(categories = categories, onlyAmSatHeard = onlyAmSatHeard)
+            )
+            _uiState.update { it.copy(categories = categories, onlyAmSatHeard = onlyAmSatHeard) }
+        }
 
     private fun refreshPasses() = viewModelScope.launch {
+        // The fix lands later and on its own: a new position recalculates the passes by itself,
+        // and a clock correction is picked up by the next tick.
+        settingsRepo.syncWithGps()
         val settings = settingsRepo.passesSettings.value
         satelliteRepo.calculatePasses(
-            time = System.currentTimeMillis(),
+            time = AppClock.now(),
             hoursAhead = settings.hoursAhead,
             minElevation = settings.minElevation,
             aosStartMinute = settings.aosStartMinute,
             aosEndMinute = settings.aosEndMinute,
             invertAosTimeWindow = settings.invertAosTimeWindow,
-            categories = settings.categories
+            categories = settings.categories,
+            onlyAmSatHeard = settings.onlyAmSatHeard
         )
     }
 
@@ -333,7 +362,8 @@ class PassesViewModel(
             initializer {
                 PassesViewModel(
                     satelliteRepo = container.satelliteRepo,
-                    settingsRepo = container.settingsRepo
+                    settingsRepo = container.settingsRepo,
+                    amSatRepo = container.amSatRepo
                 )
             }
         }

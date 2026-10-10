@@ -17,7 +17,10 @@
  */
 package com.rtbishop.look4sat.core.data.framework
 
+import com.rtbishop.look4sat.core.domain.model.N76TxPower
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -56,6 +59,50 @@ class N76ProtocolTest {
         val payload = N76Protocol.buildSatelliteInfo("SO-50", 180, 45, 800, 650, 12)
         assertEquals(30, payload.size)
         assertTrue(payload.decodeToString().startsWith("SO-50"))
+    }
+
+    @Test
+    fun txPowerDefaultsToNoChangeAndOnlyTouchesItsTwoBits() {
+        val untouched = N76Protocol.buildFreqModeParam(145_900_000, 435_100_000, 6700, 0)
+        assertEquals(0, untouched[13].toInt() and 0x03)
+        val high = N76Protocol.buildFreqModeParam(
+            145_900_000, 435_100_000, 6700, 0, txPowerLevel = N76Protocol.txPowerLevel(N76TxPower.High)
+        )
+        // Bits 110-111 are the two low bits of byte 13; every other byte must be identical.
+        assertEquals(0x03, high[13].toInt() and 0x03)
+        high[13] = (high[13].toInt() and 0x03.inv()).toByte()
+        assertArrayEquals(untouched, high)
+    }
+
+    @Test
+    fun monitorToggleIsProgFuncFifteen() {
+        val packet = N76Protocol.toggleMonitor()
+        assertEquals(0x42.toByte(), packet[7])
+        assertEquals(0x0F.toByte(), packet[9])
+    }
+
+    @Test
+    fun beaconRequestIsProgFuncNineteen() {
+        val packet = N76Protocol.sendLocation()
+        assertEquals(0x42.toByte(), packet[7])
+        assertEquals(0x13.toByte(), packet[9])
+    }
+
+    @Test
+    fun positionIsSigned24BitArcminutesTimes500() {
+        // -34.5° and -58.5° scale to -1_035_000 and -1_755_000.
+        val long = N76Protocol.buildPosition(-34.5, -58.5, 25.0, 1_760_000_000L)
+        assertEquals(18, long.size)
+        assertArrayEquals(byteArrayOf(0xF0.toByte(), 0x35, 0x08), long.copyOfRange(0, 3))
+        assertArrayEquals(byteArrayOf(0xE5.toByte(), 0x38, 0x88.toByte()), long.copyOfRange(3, 6))
+        assertArrayEquals(byteArrayOf(0x00, 0x19), long.copyOfRange(6, 8))
+        // Speed and bearing unknown, then the fix time.
+        assertArrayEquals(ByteArray(4) { 0xFF.toByte() }, long.copyOfRange(8, 12))
+        assertArrayEquals(byteArrayOf(0x68, 0xE7.toByte(), 0x78, 0x00), long.copyOfRange(12, 16))
+
+        val short = N76Protocol.buildPosition(-34.5, -58.5, 25.0, 1_760_000_000L, longFormat = false)
+        assertArrayEquals(long.copyOfRange(0, 6), short)
+        assertEquals(0x20.toByte(), N76Protocol.positionPacket(0.0, 0.0, 0.0, 0L, true)[7])
     }
 
     @Test

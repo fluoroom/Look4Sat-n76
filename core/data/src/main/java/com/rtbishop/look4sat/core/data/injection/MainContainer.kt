@@ -20,6 +20,8 @@ package com.rtbishop.look4sat.core.data.injection
 import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.hardware.SensorManager
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.hardware.display.DisplayManager
 import android.location.LocationManager
 import androidx.core.content.pm.PackageInfoCompat
@@ -160,6 +162,20 @@ class MainContainer(private val context: Context) : IMainContainer {
         } catch (_: SecurityException) {}
     }
 
+    override fun provideAudioOutputs(): List<Pair<Int, String>> =
+        context.getSystemService(AudioManager::class.java)
+            .getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+            .map { device -> device.id to "${device.productName} (${audioTypeName(device.type)})" }
+
+    private fun audioTypeName(type: Int): String = when (type) {
+        AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "speaker"
+        AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> "earpiece"
+        AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> "wired"
+        AudioDeviceInfo.TYPE_USB_DEVICE, AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_USB_ACCESSORY -> "USB"
+        AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "Bluetooth"
+        else -> "other"
+    }
+
     private fun provideDatabaseRepo(): IDatabaseRepo {
         val dbDispatcher = Dispatchers.Default
         val dataParser = DataParser(dbDispatcher)
@@ -184,7 +200,7 @@ class MainContainer(private val context: Context) : IMainContainer {
     }
 
     private fun provideSatelliteRepo(): ISatelliteRepo {
-        return SatelliteRepo(Dispatchers.Default, localSource, settingsRepo)
+        return SatelliteRepo(Dispatchers.Default, localSource, settingsRepo, amSatRepo)
     }
 
     private fun provideSelectionRepo(): ISelectionRepo {

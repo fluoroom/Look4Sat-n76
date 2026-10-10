@@ -18,7 +18,6 @@
 package com.rtbishop.look4sat.core.data.repository
 
 import com.rtbishop.look4sat.core.domain.model.SatItem
-import com.rtbishop.look4sat.core.domain.model.SatStatusPage
 import com.rtbishop.look4sat.core.domain.repository.IAmSatRepository
 import com.rtbishop.look4sat.core.domain.repository.ISelectionRepo
 import com.rtbishop.look4sat.core.domain.repository.ISettingsRepo
@@ -26,7 +25,7 @@ import com.rtbishop.look4sat.core.domain.source.ILocalSource
 import com.rtbishop.look4sat.core.domain.source.Sources
 import com.rtbishop.look4sat.core.domain.utility.AmSatNameMatch
 import com.rtbishop.look4sat.core.domain.utility.SatStatusCategory
-import com.rtbishop.look4sat.core.domain.utility.categories
+import com.rtbishop.look4sat.core.domain.utility.amSatKeysReportedAs
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -45,7 +44,6 @@ class SelectionRepo(
 
     private val currentItems = MutableStateFlow<List<SatItem>>(emptyList())
     private val currentQuery = MutableStateFlow("")
-    private var cachedAmSatPage: SatStatusPage? = null
 
     // Resolve sat IDs once when modes change, then filter items reactively.
     // The HashSet gives O(1) catnum lookups instead of O(n) with a List.
@@ -126,19 +124,8 @@ class SelectionRepo(
      * Returns null when the report page cannot be had — offline, or AMSAT down — so the filter
      * goes quiet instead of emptying the list on a device that is working perfectly well.
      */
-    private suspend fun amSatKeysWithStatuses(statuses: Set<SatStatusCategory>): Set<String>? {
-        val page = amSatPage() ?: return null
-        return page.statuses
-            .filter { status -> status.categories(page.reports).any { it in statuses } }
-            .flatMapTo(HashSet()) { AmSatNameMatch.amSatKeys(it.name) }
-    }
-
-    /** One fetch serves every filter change for [AMSAT_PAGE_TTL_MS]; the status screen refreshes its own copy. */
-    private suspend fun amSatPage(): SatStatusPage? {
-        val cached = cachedAmSatPage
-        if (cached != null && System.currentTimeMillis() - cached.fetchedAtUtcMs < AMSAT_PAGE_TTL_MS) return cached
-        return amSatRepo.fetchStatus()?.also { cachedAmSatPage = it } ?: cached
-    }
+    private suspend fun amSatKeysWithStatuses(statuses: Set<SatStatusCategory>): Set<String>? =
+        amSatRepo.recentStatus()?.amSatKeysReportedAs(statuses)
 
     /**
      * Bulk selection using a pre-built Set for O(1) lookups.
@@ -177,9 +164,4 @@ class SelectionRepo(
     /** Lowercases and strips all non-alphanumeric chars for fuzzy matching. */
     private fun normalizeForSearch(text: String): String =
         text.lowercase().filter { it.isLetterOrDigit() }
-
-    private companion object {
-        /** A stale page only costs a satellite its slot in the list, so a long window is fine. */
-        const val AMSAT_PAGE_TTL_MS = 10 * 60 * 1000L
-    }
 }

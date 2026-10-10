@@ -51,6 +51,11 @@
     <string name="pass_transponder_modes">Modulation mode</string>
     <string name="pass_transponder_bands">Band configuration</string>
     <string name="pass_transponder_any">any</string>
+    <string name="pass_transponder_amsat_heard">Only AMSAT heard</string>
+    <string name="pass_amsat_heard">AMSAT: heard</string>
+    <string name="pass_amsat_beacon">AMSAT: beacon or telemetry only</string>
+    <string name="pass_amsat_not_heard">AMSAT: not heard</string>
+    <string name="pass_amsat_no_data">AMSAT: no data</string>
     <string name="pass_transponder_hint">
         Each category matches a mode set AND a band set on the same transceiver.
         A transceiver passes when it matches any included category and no excluded one.
@@ -106,6 +111,7 @@
     <string name="amsat_sort_recent_detail">last report %1$dh ago</string>
     <string name="amsat_sort_recent_now">reported this hour</string>
     <string name="amsat_sort_no_reports">no reports</string>
+    <string name="amsat_sort_not_heard">not heard</string>
     <string name="amsat_sort_window_note">Ranked over the ~33h AMSAT returns (API caps at 500 reports)</string>
     <string name="amsat_name">Name</string>
     <string name="amsat_load_failed">Load failed - check network and retry</string>
@@ -294,6 +300,9 @@
     <string name="prefs_other_title">Other</string>
     <string name="prefs_other_switch_utc">UTC time</string>
     <string name="prefs_other_switch_update">Auto-update</string>
+    <string name="prefs_other_update_interval">Auto-update interval</string>
+    <string name="prefs_other_switch_auto_gps">Auto GPS</string>
+    <string name="prefs_other_switch_gps_time">GPS time</string>
     <string name="prefs_other_switch_sweep">Radar sweep</string>
     <string name="prefs_other_switch_sensors">Sensors</string>
     <string name="prefs_other_switch_night_mode">Night filter</string>

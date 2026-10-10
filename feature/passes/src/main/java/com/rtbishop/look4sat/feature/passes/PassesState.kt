@@ -19,6 +19,7 @@ package com.rtbishop.look4sat.feature.passes
 
 import com.rtbishop.look4sat.core.domain.model.FilterCategory
 import com.rtbishop.look4sat.core.domain.predict.OrbitalPass
+import com.rtbishop.look4sat.core.domain.utility.SatStatusCategory
 
 data class PassesState(
     val isPassesDialogShown: Boolean = false,
@@ -36,6 +37,9 @@ data class PassesState(
     val invertAosTimeWindow: Boolean = false,
     val showDeepSpace: Boolean = true,
     val categories: List<FilterCategory> = emptyList(),
+    val onlyAmSatHeard: Boolean = false,
+    /** What AMSAT observers last made of each satellite, by name; absent means no data. */
+    val amSatStatus: Map<String, SatStatusCategory> = emptyMap(),
     val availableModes: List<String> = emptyList(),
     val itemsList: List<OrbitalPass> = emptyList(),
     val groupedPasses: Map<String, List<OrbitalPass>> = emptyMap(),
@@ -55,7 +59,7 @@ sealed interface PassesAction {
         val invertAosTimeWindow: Boolean,
         val showDeepSpace: Boolean
     ) : PassesAction
-    data class FilterTransponders(val categories: List<FilterCategory>) : PassesAction
+    data class FilterTransponders(val categories: List<FilterCategory>, val onlyAmSatHeard: Boolean) : PassesAction
     data object RefreshPasses : PassesAction
     data object TogglePassesDialog : PassesAction
     data object ToggleTransponderDialog : PassesAction

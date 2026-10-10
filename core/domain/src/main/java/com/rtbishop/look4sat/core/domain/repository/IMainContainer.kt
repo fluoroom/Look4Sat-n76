@@ -41,6 +41,8 @@ interface IMainContainer {
     fun provideAudioCapture(): IAudioCapture
     fun provideSaveImage(): ISaveImage
     fun providePairedBluetoothDevices(): List<Pair<String, String>>
+    /** Audio outputs present right now, as Android device id to a readable name. */
+    fun provideAudioOutputs(): List<Pair<Int, String>>
 }
 
 interface IContainerProvider {

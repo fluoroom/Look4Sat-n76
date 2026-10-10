@@ -17,6 +17,13 @@
  */
 package com.rtbishop.look4sat.feature.passes
 
+import com.rtbishop.look4sat.core.domain.utility.SatStatusCategory
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -131,9 +138,10 @@ private fun PassesScreen(
         TransponderDialog(
             categories = uiState.categories,
             availableModes = uiState.availableModes,
+            onlyAmSatHeard = uiState.onlyAmSatHeard,
             cancel = { onAction(PassesAction.ToggleTransponderDialog) }
-        ) { categories ->
-            onAction(PassesAction.FilterTransponders(categories))
+        ) { categories, onlyAmSatHeard ->
+            onAction(PassesAction.FilterTransponders(categories, onlyAmSatHeard))
         }
     }
     if (uiState.shouldSeeWhatsNew) {
@@ -169,6 +177,7 @@ private fun PassesScreen(
             groupedPasses = uiState.groupedPasses,
             sunTimes = uiState.sunTimes,
             isSearching = uiState.searchQuery.isNotBlank(),
+            amSatStatus = uiState.amSatStatus,
             timeNow = timeNow,
             navigateToRadar = navigateToRadar,
             onAction = onAction
@@ -184,6 +193,7 @@ private fun PassesList(
     groupedPasses: Map<String, List<OrbitalPass>>,
     sunTimes: Map<String, Pair<String, String>>,
     isSearching: Boolean,
+    amSatStatus: Map<String, SatStatusCategory>,
     timeNow: StateFlow<Long>,
     navigateToRadar: (Int, Long) -> Unit,
     onAction: (PassesAction) -> Unit
@@ -226,7 +236,8 @@ private fun PassesList(
                                 timeNow = timeNow,
                                 modifier = Modifier.animateItem(),
                                 isVerticalLayout = isVerticalLayout,
-                                isUtc = isUtc
+                                isUtc = isUtc,
+                                amSatStatus = amSatStatus[pass.name]
                             )
                         }
                     }
@@ -361,6 +372,35 @@ private fun PassProgressBar(pass: OrbitalPass, timeNow: StateFlow<Long>, modifie
     )
 }
 
+/**
+ * What AMSAT observers report for the satellite: a tick when heard, the radio icon when only its
+ * beacon or telemetry was, a cross when reported not heard, and a dim dot when there is no data.
+ * Colours are the ones the AMSAT status page uses.
+ */
+@Composable
+private fun AmSatStatusIcon(status: SatStatusCategory?) {
+    val (iconId, tint, label) = when (status) {
+        SatStatusCategory.Active -> Triple(R.drawable.ic_done, Color(0xFF648FFF), R.string.pass_amsat_heard)
+        SatStatusCategory.TelemetryOnly -> Triple(R.drawable.ic_radios, Color(0xFFFFB000), R.string.pass_amsat_beacon)
+        SatStatusCategory.NotHeard -> Triple(R.drawable.ic_close, Color(0xFFDC267F), R.string.pass_amsat_not_heard)
+        else -> Triple(null, MaterialTheme.colorScheme.outlineVariant, R.string.pass_amsat_no_data)
+    }
+    val description = stringResource(label)
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .padding(end = 6.dp)
+            .size(16.dp)
+            .semantics { contentDescription = description }
+    ) {
+        if (iconId != null) {
+            Icon(painter = painterResource(iconId), contentDescription = null, tint = tint, modifier = Modifier.size(16.dp))
+        } else {
+            Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(tint))
+        }
+    }
+}
+
 @Composable
 private fun PassItem(
     pass: OrbitalPass,
@@ -368,7 +408,8 @@ private fun PassItem(
     timeNow: StateFlow<Long>,
     modifier: Modifier = Modifier,
     isVerticalLayout: Boolean = true,
-    isUtc: Boolean = false
+    isUtc: Boolean = false,
+    amSatStatus: SatStatusCategory? = null
 ) {
     val passSatId = stringResource(id = R.string.pass_satId, pass.catNum)
     val horizontalPadding = if (isVerticalLayout) 6.dp else 12.dp
@@ -423,6 +464,7 @@ private fun PassItem(
                     overflow = TextOverflow.Ellipsis,
                     color = MaterialTheme.colorScheme.onSurface
                 )
+                AmSatStatusIcon(amSatStatus)
                 PassTimerChip(pass = pass, timeNow = timeNow)
             }
             Row(

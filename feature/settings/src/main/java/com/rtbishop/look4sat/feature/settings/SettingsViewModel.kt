@@ -131,6 +131,11 @@ class SettingsViewModel(
             // Toggles
             is SettingsAction.ToggleUtc -> settingsRepo.updateOtherSettings { it.copy(stateOfUtc = action.value) }
             is SettingsAction.ToggleUpdate -> settingsRepo.updateOtherSettings { it.copy(stateOfAutoUpdate = action.value) }
+            is SettingsAction.SetAutoUpdateInterval ->
+                settingsRepo.updateOtherSettings { it.copy(autoUpdateIntervalMin = action.minutes) }
+            is SettingsAction.ToggleAutoGps -> settingsRepo.updateOtherSettings { it.copy(stateOfAutoGps = action.value) }
+            is SettingsAction.ToggleGpsTime -> settingsRepo.updateOtherSettings { it.copy(stateOfGpsTime = action.value) }
+            SettingsAction.SyncWithGps -> settingsRepo.syncWithGps()
             is SettingsAction.ToggleSweep -> settingsRepo.updateOtherSettings { it.copy(stateOfSweep = action.value) }
             is SettingsAction.ToggleSensor -> settingsRepo.updateOtherSettings { it.copy(stateOfSensors = action.value) }
             is SettingsAction.ToggleLightTheme -> settingsRepo.updateOtherSettings {

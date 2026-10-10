@@ -83,7 +83,8 @@ class N76AudioReceiver(private val mac: String, private val adapter: BluetoothAd
             try {
                 val sock = device.createRfcommSocketToServiceRecord(AUDIO_UUID)
                 socket = sock
-                adapter.cancelDiscovery()
+                // Needs BLUETOOTH_SCAN, which a fresh install may not hold; connecting works without it.
+                try { adapter.cancelDiscovery() } catch (_: SecurityException) {}
                 sock.connect()
                 log("audio: HT audio connected OK")
                 onActiveChanged?.invoke(true)

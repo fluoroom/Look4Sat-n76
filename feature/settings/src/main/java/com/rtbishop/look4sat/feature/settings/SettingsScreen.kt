@@ -274,7 +274,7 @@ private fun SettingsScreen(uiState: SettingsState, onAction: (SettingsAction) ->
             item(span = { GridItemSpan(maxLineSpan) }) {
                 if (isVerticalLayout) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        OtherCard(uiState.otherSettings, onAction)
+                        OtherCard(uiState.otherSettings, onAction, permissions.launchGpsSync)
                         CardCredits()
                     }
                 } else {
@@ -282,7 +282,12 @@ private fun SettingsScreen(uiState: SettingsState, onAction: (SettingsAction) ->
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)
                     ) {
-                        OtherCard(uiState.otherSettings, onAction, modifier = Modifier.weight(1f).fillMaxHeight())
+                        OtherCard(
+                            uiState.otherSettings,
+                            onAction,
+                            permissions.launchGpsSync,
+                            modifier = Modifier.weight(1f).fillMaxHeight()
+                        )
                         CardCredits(modifier = Modifier.weight(1f).fillMaxHeight())
                     }
                 }
@@ -465,11 +470,16 @@ private fun OtherCardPreview() = MainTheme {
         shouldSeeWarning = false,
         shouldSeeWhatsNew = false
     )
-    OtherCard(settings = values, onAction = {})
+    OtherCard(settings = values, onAction = {}, requestGps = {})
 }
 
 @Composable
-private fun OtherCard(settings: OtherSettings, onAction: (SettingsAction) -> Unit, modifier: Modifier = Modifier) {
+private fun OtherCard(
+    settings: OtherSettings,
+    onAction: (SettingsAction) -> Unit,
+    requestGps: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     ElevatedCard(modifier = modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
             Text(
@@ -484,6 +494,28 @@ private fun OtherCard(settings: OtherSettings, onAction: (SettingsAction) -> Uni
                 }
                 SwitchTile(R.string.prefs_other_switch_utc, settings.stateOfUtc) {
                     onAction(SettingsAction.ToggleUtc(it))
+                }
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            ChoiceDropdown(
+                label = stringResource(R.string.prefs_other_update_interval),
+                selected = settings.autoUpdateIntervalMin,
+                options = OtherSettings.AUTO_UPDATE_INTERVALS_MIN,
+                optionLabel = { minutes -> if (minutes < 60) "$minutes min" else "${minutes / 60} h" },
+                onSelect = { onAction(SettingsAction.SetAutoUpdateInterval(it)) },
+                enabled = settings.stateOfAutoUpdate
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            // GPS: position and clock from a fresh fix. Switching either on asks for the
+            // location permission and takes a first fix straight away.
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SwitchTile(R.string.prefs_other_switch_auto_gps, settings.stateOfAutoGps) {
+                    onAction(SettingsAction.ToggleAutoGps(it))
+                    if (it) requestGps()
+                }
+                SwitchTile(R.string.prefs_other_switch_gps_time, settings.stateOfGpsTime) {
+                    onAction(SettingsAction.ToggleGpsTime(it))
+                    if (it) requestGps()
                 }
             }
             Spacer(modifier = Modifier.height(4.dp))
@@ -727,6 +759,7 @@ private fun rememberDialogVisibility(): DialogVisibility {
 @Stable
 private class SettingsPermissions(
     val launchLocation: () -> Unit,
+    val launchGpsSync: () -> Unit,
     val launchTleImport: () -> Unit,
     val launchTransceiverImport: () -> Unit,
     val launchBluetooth: () -> Unit,
@@ -746,6 +779,15 @@ private fun rememberSettingsPermissions(
         val fine = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true
         val coarse = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         if (fine || coarse) sendAction(SettingsAction.SetGpsPosition)
+        else sendAction(SettingsAction.ShowToast(locationError))
+    }
+
+    // Unlike locationRequest this must not overwrite the position by itself: with only GPS time
+    // on, a hand-entered station position has to survive the grant.
+    val gpsSyncRequest = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        if (permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true) sendAction(SettingsAction.SyncWithGps)
         else sendAction(SettingsAction.ShowToast(locationError))
     }
 
@@ -778,6 +820,11 @@ private fun rememberSettingsPermissions(
         SettingsPermissions(
             launchLocation = {
                 locationRequest.launch(
+                    arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION)
+                )
+            },
+            launchGpsSync = {
+                gpsSyncRequest.launch(
                     arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION)
                 )
             },

@@ -82,7 +82,8 @@ import kotlinx.coroutines.launch
 private enum class RadarPage(val title: String) {
     Transceivers("Transceivers"),
     Calculator("Calculator"),
-    Sstv("SSTV")
+    Sstv("SSTV"),
+    Aprs("APRS")
 }
 
 @Composable
@@ -121,9 +122,20 @@ fun RadarDestination(navigateUp: () -> Unit) {
         }
     }
 
-    RadarScreen(uiState, viewModel::onAction, navigateUp, requestMicPermission = {
-        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-    })
+    val locationLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        viewModel.onAction(if (granted) RadarAction.AprsLocationFromGps else RadarAction.AprsLocationDenied)
+    }
+
+    RadarScreen(
+        uiState,
+        viewModel::onAction,
+        navigateUp,
+        requestMicPermission = { permissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
+        // Asked for on each tap: already granted answers at once, and the fix is taken then.
+        requestGpsFix = { locationLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION) }
+    )
 }
 
 @Composable
@@ -131,7 +143,8 @@ private fun RadarScreen(
     uiState: RadarState,
     onAction: (RadarAction) -> Unit,
     navigateUp: () -> Unit,
-    requestMicPermission: () -> Unit
+    requestMicPermission: () -> Unit,
+    requestGpsFix: () -> Unit
 ) {
     val upcomingPass = uiState.currentPass ?: getDefaultPass()
     val addToCalendar: () -> Unit = {
@@ -162,11 +175,11 @@ private fun RadarScreen(
         }
         if (isVertical) {
             RadarCard(uiState, Modifier.weight(1f))
-            PagerCard(uiState, onAction, requestMicPermission, Modifier.weight(1f))
+            PagerCard(uiState, onAction, requestMicPermission, requestGpsFix, Modifier.weight(1f))
         } else {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 RadarCard(uiState, Modifier.weight(1f))
-                PagerCard(uiState, onAction, requestMicPermission, Modifier.weight(1f))
+                PagerCard(uiState, onAction, requestMicPermission, requestGpsFix, Modifier.weight(1f))
             }
         }
     }
@@ -177,6 +190,7 @@ private fun PagerCard(
     uiState: RadarState,
     onAction: (RadarAction) -> Unit,
     requestMicPermission: () -> Unit,
+    requestGpsFix: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val hasCalculatorPage = remember(uiState.transceivers.transmitters) {
@@ -187,6 +201,7 @@ private fun PagerCard(
             add(RadarPage.Transceivers)
             if (hasCalculatorPage) add(RadarPage.Calculator)
             add(RadarPage.Sstv)
+            add(RadarPage.Aprs)
         }
     }
     val pagerState = rememberPagerState(pageCount = { pages.size })
@@ -233,6 +248,11 @@ private fun PagerCard(
                         dopplerFrequency = uiState.transceivers.selectedFrequency?.let { formatFrequency(it) },
                         onAction = onAction,
                         requestMicPermission = requestMicPermission
+                    )
+                    RadarPage.Aprs -> AprsPage(
+                        aprs = uiState.aprs,
+                        onAction = onAction,
+                        requestGpsFix = requestGpsFix
                     )
                 }
             }

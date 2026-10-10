@@ -35,6 +35,16 @@ class AmSatRepository(private val remoteSource: IRemoteSource) : IAmSatRepositor
         timeZone = TimeZone.getTimeZone("UTC")
     }
 
+    @Volatile
+    private var lastPage: SatStatusPage? = null
+
+    /** One fetch serves every filter for [RECENT_PAGE_TTL_MS]; a failed refresh keeps the old page. */
+    override suspend fun recentStatus(): SatStatusPage? {
+        val cached = lastPage
+        if (cached != null && System.currentTimeMillis() - cached.fetchedAtUtcMs < RECENT_PAGE_TTL_MS) return cached
+        return fetchStatus() ?: cached
+    }
+
     override suspend fun fetchStatus(): SatStatusPage? = withContext(Dispatchers.IO) {
         val nowSec = System.currentTimeMillis() / 1000
         val catalogJson = remoteSource.getAmSatCatalog() ?: return@withContext null
@@ -49,7 +59,7 @@ class AmSatRepository(private val remoteSource: IRemoteSource) : IAmSatRepositor
 
         val statuses = buildStatuses(names, reports, nowSec)
         val reportMap = reports.associate { it.id to toSatReport(it) }
-        SatStatusPage(System.currentTimeMillis(), statuses, reportMap)
+        SatStatusPage(System.currentTimeMillis(), statuses, reportMap).also { lastPage = it }
     }
 
     override suspend fun submitReport(submission: AmSatReportSubmission): AmSatReportSubmitResult = withContext(Dispatchers.IO) {
@@ -205,5 +215,8 @@ class AmSatRepository(private val remoteSource: IRemoteSource) : IAmSatRepositor
         private const val NOT_HEARD_PINK = 0xFFDC267F
         private const val CONFLICT_DEEP_ORANGE = 0xFFFE6100
         private const val NO_REPORT_GRAY = 0xFFC0C0C0
+
+        /** A stale page only costs a satellite its slot in a list, so a long window is fine. */
+        private const val RECENT_PAGE_TTL_MS = 10 * 60 * 1000L
     }
 }

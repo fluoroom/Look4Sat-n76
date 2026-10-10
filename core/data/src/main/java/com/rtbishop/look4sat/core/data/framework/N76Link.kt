@@ -44,6 +44,7 @@ class N76Link(private val context: Context) {
     private var mac = ""
     private var audioRfcomm = false
     private var monitorOn = false
+    private var squelchOpenedByUs = false
 
     var onLog: ((String) -> Unit)? = null
     var onAudioActive: ((Boolean) -> Unit)? = null
@@ -76,6 +77,7 @@ class N76Link(private val context: Context) {
     }
 
     fun disconnect() {
+        setSquelchOpen(false)
         stopPlayback()
         teardownAudio()
         bt.disconnect()
@@ -96,6 +98,27 @@ class N76Link(private val context: Context) {
         monitorOn = on
         audio?.monitorEnabled = on
         onLog?.invoke("audio: speaker monitor ${if (on) "ON" else "OFF"}")
+    }
+
+    /**
+     * Switches the radio's monitor on (squelch open) or back off. The radio only offers a
+     * toggle, so this keeps count: it flips the monitor only when the wanted state differs from
+     * what this link last set, and assumes the monitor was off when the link came up.
+     */
+    @Synchronized
+    fun setSquelchOpen(open: Boolean) {
+        if (open == squelchOpenedByUs || !bt.isConnected) return
+        if (bt.send(N76Protocol.toggleMonitor())) {
+            squelchOpenedByUs = open
+            onLog?.invoke(if (open) "sql: radio monitor ON (squelch open)" else "sql: radio monitor OFF")
+        }
+    }
+
+    /** Asks the radio for one APRS beacon, sent with its own callsign, path and message. */
+    fun sendLocationBeacon(): Boolean {
+        if (!bt.isConnected) return false
+        onLog?.invoke("aprs: beacon requested")
+        return bt.send(N76Protocol.sendLocation())
     }
 
     fun exitSatMode() {
@@ -122,6 +145,7 @@ class N76Link(private val context: Context) {
             recordHt = settings.recordHt,
             recordInput = settings.recordMic,
             inputDeviceId = settings.inputDeviceId,
+            micGainDb = settings.micGainDb,
             satName = satName,
             safDirUri = saf
         )
@@ -187,10 +211,10 @@ class N76Link(private val context: Context) {
     private fun onBtConnected() {
         if (!audioRfcomm) return
         bt.send(N76Protocol.buildPacket(N76Protocol.CMD_READ_BSS_SETTINGS, byteArrayOf()))
-        onLog?.invoke("audio: requesting BSS to enable audio_relay_en…")
+        onLog?.invoke("audio: checking the radio's Bluetooth RX audio flag…")
         startHmLinkAudio()
         mainHandler.postDelayed({
-            if (!bssWritten) onLog?.invoke("audio: BSS ACK not received within 5 s")
+            if (!bssWritten) onLog?.invoke("audio: no answer from the radio within 5 s")
         }, 5000L)
     }
 
@@ -210,12 +234,12 @@ class N76Link(private val context: Context) {
 
     private fun enableAudioRelay(blob: ByteArray) {
         if (blob.isEmpty()) {
-            onLog?.invoke("audio: BSS blob empty, cannot set audio_relay_en")
+            onLog?.invoke("audio: empty answer, Bluetooth RX audio flag not set")
             return
         }
         val relayAlreadyOn = (blob[2].toInt() ushr 1) and 1
         if (relayAlreadyOn == 1) {
-            onLog?.invoke("audio: audio_relay_en already set — no BSS write needed")
+            onLog?.invoke("audio: Bluetooth RX audio flag already set")
             bssWritten = true
             return
         }
@@ -224,7 +248,7 @@ class N76Link(private val context: Context) {
         mod[2] = (mod[2].toInt() or 0x02).toByte()
         bt.send(N76Protocol.buildPacket(N76Protocol.CMD_WRITE_BSS_SETTINGS, mod))
         bssWritten = true
-        onLog?.invoke("audio: BSS written — audio_relay_en=1 (was 0)")
+        onLog?.invoke("audio: Bluetooth RX audio flag set (was off)")
     }
 
     private fun startHmLinkAudio() {
@@ -245,7 +269,7 @@ class N76Link(private val context: Context) {
         audio = null
         val orig = originalBss
         if (orig != null && bt.isConnected) {
-            onLog?.invoke("audio: restoring original BSS audio_relay_en")
+            onLog?.invoke("audio: Bluetooth RX audio flag put back as it was")
             bt.send(N76Protocol.buildPacket(N76Protocol.CMD_WRITE_BSS_SETTINGS, orig))
         }
         originalBss = null

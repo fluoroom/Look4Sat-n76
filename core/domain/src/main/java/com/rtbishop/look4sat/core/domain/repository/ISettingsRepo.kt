@@ -17,6 +17,7 @@
  */
 package com.rtbishop.look4sat.core.domain.repository
 
+import com.rtbishop.look4sat.core.domain.model.AprsSettings
 import com.rtbishop.look4sat.core.domain.model.DataSourcesSettings
 import com.rtbishop.look4sat.core.domain.model.DatabaseState
 import com.rtbishop.look4sat.core.domain.model.OtherSettings
@@ -53,6 +54,14 @@ interface ISettingsRepo {
     fun setStationPosition(latitude: Double, longitude: Double, altitude: Double): Boolean
     fun setStationPosition(): Boolean
     fun setStationPosition(locator: String): Boolean
+    /**
+     * Asks for one fresh GPS fix and applies what the user opted into: the station position
+     * (auto GPS) and the app clock correction (GPS time). Returns at once; a no-op when both
+     * options are off or location is unavailable.
+     */
+    fun syncWithGps()
+    /** Asks for one fresh GPS fix and hands it over; false when location cannot be used at all. */
+    fun requestGpsFix(onFix: (latitude: Double, longitude: Double) -> Unit): Boolean
     //endregion
 
     //region # Database update settings
@@ -87,6 +96,8 @@ interface ISettingsRepo {
     fun updateRadioControlSettings(settings: RadioControlSettings)
     val n76Settings: StateFlow<N76Settings>
     fun updateN76Settings(settings: N76Settings)
+    val aprsSettings: StateFlow<AprsSettings>
+    fun updateAprsSettings(settings: AprsSettings)
     //endregion
 
     //region # Per-satellite calculator offset settings

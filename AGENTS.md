@@ -110,6 +110,11 @@ Look4Sat supports both TLE and OMM (Orbit Mean-Elements Message) CSV formats:
 - Orbital math lives in `core:domain/predict/` — dense vector math (SGP4/SDP4). Tread carefully.
 - SSTV decoding in `feature:radar` is experimental; image quality depends on signal strength during satellite pass.
 - `build-logic/convention/` contains shared Gradle configuration — edit there, not in individual modules.
+- Prediction and tracking code reads the time from `AppClock.now()` (`core:domain/utility`), not
+  `System.currentTimeMillis()`: it carries the GPS time correction.
+- APRS (AX.25 frames, KISS, Bell 202 modem) lives in `core:domain/aprs/`, pure Kotlin and unit-tested.
+- N76 radio code (`core:data/framework/N76*.kt`) cannot be tested without the radio. Keep what
+  works byte-for-byte; add new radio traffic only behind the option that needs it.
 
 ## Copilot Working Mode: Code-Only
 

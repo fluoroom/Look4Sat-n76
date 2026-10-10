@@ -4,7 +4,11 @@ import com.rtbishop.look4sat.core.domain.model.SatDay
 import com.rtbishop.look4sat.core.domain.model.SatReport
 import com.rtbishop.look4sat.core.domain.model.SatSlot
 import com.rtbishop.look4sat.core.domain.model.SatStatus
+import com.rtbishop.look4sat.core.domain.model.SatStatusPage
 import com.rtbishop.look4sat.core.domain.utility.AmSatNameMatch
+import com.rtbishop.look4sat.core.domain.utility.HEARD_CATEGORIES
+import com.rtbishop.look4sat.core.domain.utility.amSatKeysReportedAs
+import com.rtbishop.look4sat.core.domain.utility.bestCategories
 import com.rtbishop.look4sat.core.domain.utility.SatStatusCategory
 import com.rtbishop.look4sat.core.domain.utility.categories
 import com.rtbishop.look4sat.core.domain.utility.categoryOfReport
@@ -76,6 +80,52 @@ class AmSatFilterTest {
     fun `a satellite with no reports at all is filtered out`() {
         val all = listOf(sat("AO-91"))
         assertTrue(all.filteredByCategories(setOf(SatStatusCategory.NotHeard), reports).isEmpty())
+    }
+
+    @Test
+    fun `heard keys cover voice and telemetry-only satellites but not the silent ones`() {
+        val page = SatStatusPage(
+            fetchedAtUtcMs = 0L,
+            statuses = listOf(
+                sat("AO-91[FM]", "Heard"),
+                sat("AO-73", "Telemetry Only"),
+                sat("SO-50[FM]", "Not Heard"),
+                sat("PO-101[FM]")
+            ),
+            reports = reports
+        )
+        val keys = page.amSatKeysReportedAs(HEARD_CATEGORIES)
+        assertTrue(AmSatNameMatch.matches("AO-91 (FOX-1B)", keys))
+        assertTrue(AmSatNameMatch.matches("AO-73 (FUNCUBE-1)", keys))
+        assertFalse(AmSatNameMatch.matches("SO-50 (SAUDISAT 1C)", keys))
+        assertFalse(AmSatNameMatch.matches("DIWATA-2B (PO-101)", keys))
+    }
+
+    @Test
+    fun `each satellite gets the strongest status reported for it`() {
+        val page = SatStatusPage(
+            fetchedAtUtcMs = 0L,
+            statuses = listOf(
+                sat("AO-91[FM]", "Not Heard", "Heard"),
+                sat("AO-73", "Telemetry Only", "Not Heard"),
+                sat("SO-50[FM]", "Not Heard"),
+                // Two payloads of one satellite: the better of the two is what counts.
+                sat("ISS-DATA", "Not Heard"),
+                sat("ISS-FM", "Crew Active"),
+                sat("PO-101[FM]")
+            ),
+            reports = reports
+        )
+        val names = listOf("AO-91 (FOX-1B)", "AO-73 (FUNCUBE-1)", "SO-50 (SAUDISAT 1C)", "ISS (ZARYA)", "DIWATA-2B (PO-101)", "NOAA 19")
+        assertEquals(
+            mapOf(
+                "AO-91 (FOX-1B)" to SatStatusCategory.Active,
+                "AO-73 (FUNCUBE-1)" to SatStatusCategory.TelemetryOnly,
+                "SO-50 (SAUDISAT 1C)" to SatStatusCategory.NotHeard,
+                "ISS (ZARYA)" to SatStatusCategory.Active
+            ),
+            page.bestCategories(names)
+        )
     }
 
     @Test

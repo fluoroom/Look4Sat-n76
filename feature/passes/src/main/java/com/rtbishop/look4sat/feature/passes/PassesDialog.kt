@@ -367,8 +367,9 @@ private fun TransponderDialogPreview() {
                 FilterCategory("L/S band", listOf("FM"), listOf("L/U", "S/U"), enabled = false)
             ),
             availableModes = listOf("BPSK", "FM", "FMN", "GMSK", "SSTV"),
+            onlyAmSatHeard = true,
             cancel = {}
-        ) {}
+        ) { _, _ -> }
     }
 }
 
@@ -380,10 +381,12 @@ private fun TransponderDialogPreview() {
 internal fun TransponderDialog(
     categories: List<FilterCategory>,
     availableModes: List<String>,
+    onlyAmSatHeard: Boolean,
     cancel: () -> Unit,
-    accept: (List<FilterCategory>) -> Unit
+    accept: (List<FilterCategory>, Boolean) -> Unit
 ) {
     val draft = remember { mutableStateOf(categories) }
+    val heardOnly = remember { mutableStateOf(onlyAmSatHeard) }
     // Index into draft, or draft.size for a freshly added one. null shows the category list.
     val editIndex = remember { mutableStateOf<Int?>(null) }
     val editBuffer = remember { mutableStateOf(FilterCategory()) }
@@ -399,7 +402,9 @@ internal fun TransponderDialog(
     val onCancel: () -> Unit = if (isEditing) { { editIndex.value = null } } else cancel
     // Dropping the empty categories keeps an abandoned "Filter 3" from reaching the filter.
     val onAccept: () -> Unit =
-        if (isEditing) commitEdit else { { accept(draft.value.filterNot { it.isEmpty }).also { cancel() } } }
+        if (isEditing) commitEdit else {
+            { accept(draft.value.filterNot { it.isEmpty }, heardOnly.value).also { cancel() } }
+        }
     val title = stringResource(
         if (isEditing) R.string.pass_transponder_edit else R.string.pass_transponder_title
     )
@@ -427,6 +432,12 @@ internal fun TransponderDialog(
                     editBuffer.value = FilterCategory(name = "Filter ${draft.value.size + 1}")
                     editIndex.value = draft.value.size
                 }
+            )
+            // Not a category: it narrows by what AMSAT observers report, whatever the transceiver.
+            ToggleRow(
+                title = stringResource(R.string.pass_transponder_amsat_heard),
+                checked = heardOnly.value,
+                onCheckedChange = { heardOnly.value = it }
             )
         }
     }

@@ -17,6 +17,7 @@
  */
 package com.rtbishop.look4sat.core.data.repository
 
+import com.rtbishop.look4sat.core.domain.model.AprsSettings
 import com.rtbishop.look4sat.core.domain.model.DataSourcesSettings
 import com.rtbishop.look4sat.core.domain.model.DatabaseState
 import com.rtbishop.look4sat.core.domain.model.OtherSettings
@@ -410,6 +411,14 @@ private class FakeSettingsRepo(dataSources: DataSourcesSettings = defaultDataSou
     override fun setStationPosition(): Boolean = true
 
     override fun setStationPosition(locator: String): Boolean = true
+
+    override fun syncWithGps() = Unit
+
+    override fun requestGpsFix(onFix: (latitude: Double, longitude: Double) -> Unit): Boolean = false
+
+    override val aprsSettings: StateFlow<AprsSettings> = MutableStateFlow(AprsSettings())
+
+    override fun updateAprsSettings(settings: AprsSettings) = Unit
 
 
     override fun updateDatabaseState(state: DatabaseState) {

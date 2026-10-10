@@ -19,8 +19,12 @@ package com.rtbishop.look4sat.feature.settings
 
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
+import android.Manifest
 import android.content.Intent
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.net.Uri
+import android.os.Build
 import android.provider.DocumentsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -90,6 +94,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.rtbishop.look4sat.core.domain.model.BluetoothAddress
 import com.rtbishop.look4sat.core.domain.model.N76Settings
+import com.rtbishop.look4sat.core.domain.model.N76TxPower
 import com.rtbishop.look4sat.core.domain.model.RCSettings
 import com.rtbishop.look4sat.core.domain.model.RadioControlSettings
 import com.rtbishop.look4sat.core.domain.model.Constants
@@ -645,6 +650,13 @@ fun BluetoothOutputDialog(
     val sendSatInfo = rememberSaveable { mutableStateOf(initialN76.sendSatInfo) }
     val satFirmware = rememberSaveable { mutableStateOf(initialN76.satFirmware) }
     val pollMs = rememberSaveable { mutableLongStateOf(initialN76.pollIntervalMs) }
+    val sendPosition = rememberSaveable { mutableStateOf(initialN76.sendPosition) }
+    val sendTxPower = rememberSaveable { mutableStateOf(initialN76.sendTxPower) }
+    val txPower = rememberSaveable { mutableStateOf(initialN76.txPower) }
+    val openSquelch = rememberSaveable { mutableStateOf(initialN76.openSquelchOnTrack) }
+    val micDeviceId = rememberSaveable { mutableIntStateOf(initialN76.inputDeviceId) }
+    val micGainDb = rememberSaveable { mutableIntStateOf(initialN76.micGainDb) }
+    // The switch only stays on once the permission is held, so a recording never starts without it.
     val forceRx = rememberSaveable { mutableStateOf(initialN76.forceRxCtcss) }
     val forceRxTone = rememberSaveable { mutableIntStateOf(initialN76.forceRxCtcssHzx100) }
     val forceTx = rememberSaveable { mutableStateOf(initialN76.forceTxCtcss) }
@@ -653,6 +665,11 @@ fun BluetoothOutputDialog(
     val speakerMonitor = rememberSaveable { mutableStateOf(initialN76.speakerMonitor) }
     val recordHt = rememberSaveable { mutableStateOf(initialN76.recordHt) }
     val recordMic = rememberSaveable { mutableStateOf(initialN76.recordMic) }
+    // The switch only stays on once the permission is held, so a recording never starts without it.
+    val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        recordMic.value = granted
+    }
+    val micDevices = remember { phoneMicrophones(context.getSystemService(AudioManager::class.java)) }
     val recordSatOnly = rememberSaveable { mutableStateOf(initialN76.recordSatOnly) }
     val outputFolder = rememberSaveable { mutableStateOf(initialN76.outputFolderUri) }
 
@@ -685,6 +702,12 @@ fun BluetoothOutputDialog(
                 sendSatInfo = sendSatInfo.value,
                 satFirmware = satFirmware.value,
                 pollIntervalMs = pollMs.longValue,
+                sendPosition = sendPosition.value,
+                sendTxPower = sendTxPower.value,
+                txPower = txPower.value,
+                openSquelchOnTrack = openSquelch.value,
+                inputDeviceId = micDeviceId.intValue,
+                micGainDb = micGainDb.intValue,
                 forceRxCtcss = forceRx.value,
                 forceRxCtcssHzx100 = forceRxTone.intValue,
                 forceTxCtcss = forceTx.value,
@@ -764,6 +787,19 @@ fun BluetoothOutputDialog(
                 onSatFirmware = { satFirmware.value = it },
                 pollMs = pollMs.longValue,
                 onPollMs = { pollMs.longValue = it },
+                sendPosition = sendPosition.value,
+                onSendPosition = { sendPosition.value = it },
+                sendTxPower = sendTxPower.value,
+                onSendTxPower = { sendTxPower.value = it },
+                txPower = txPower.value,
+                onTxPower = { txPower.value = it },
+                openSquelch = openSquelch.value,
+                onOpenSquelch = { openSquelch.value = it },
+                micDevices = micDevices,
+                micDeviceId = micDeviceId.intValue,
+                onMicDevice = { micDeviceId.intValue = it },
+                micGainDb = micGainDb.intValue,
+                onMicGainDb = { micGainDb.intValue = it },
                 forceRx = forceRx.value,
                 onForceRx = { forceRx.value = it },
                 forceRxTone = forceRxTone.intValue,
@@ -782,7 +818,10 @@ fun BluetoothOutputDialog(
                     if (it) audioRfcomm.value = true
                 },
                 recordMic = recordMic.value,
-                onRecordMic = { recordMic.value = it },
+                onRecordMic = {
+                    // Already granted answers at once; otherwise Android asks here and now.
+                    if (it) micPermission.launch(Manifest.permission.RECORD_AUDIO) else recordMic.value = false
+                },
                 recordSatOnly = recordSatOnly.value,
                 onRecordSatOnly = { recordSatOnly.value = it },
                 outputFolder = outputFolder.value,
@@ -1167,6 +1206,19 @@ private fun N76DebugSettings(
     onSatFirmware: (Boolean) -> Unit,
     pollMs: Long,
     onPollMs: (Long) -> Unit,
+    sendPosition: Boolean,
+    onSendPosition: (Boolean) -> Unit,
+    sendTxPower: Boolean,
+    onSendTxPower: (Boolean) -> Unit,
+    txPower: N76TxPower,
+    onTxPower: (N76TxPower) -> Unit,
+    openSquelch: Boolean,
+    onOpenSquelch: (Boolean) -> Unit,
+    micDevices: List<Pair<Int, String>>,
+    micDeviceId: Int,
+    onMicDevice: (Int) -> Unit,
+    micGainDb: Int,
+    onMicGainDb: (Int) -> Unit,
     forceRx: Boolean,
     onForceRx: (Boolean) -> Unit,
     forceRxTone: Int,
@@ -1198,6 +1250,17 @@ private fun N76DebugSettings(
         onSelect = onPollMs,
         enabled = enabled
     )
+    N76SwitchRow("Send station position on connect (APRS)", sendPosition, onSendPosition, enabled)
+    N76SwitchRow("Send TX power", sendTxPower, onSendTxPower, enabled)
+    if (sendTxPower) ChoiceDropdown(
+        label = "TX power",
+        selected = txPower,
+        options = N76TxPower.entries,
+        optionLabel = { it.name },
+        onSelect = onTxPower,
+        enabled = enabled
+    )
+    N76SwitchRow("Open squelch while tracking (radio monitor)", openSquelch, onOpenSquelch, enabled)
     N76SwitchRow("Force RX CTCSS", forceRx, onForceRx, enabled)
     if (forceRx) N76CtcssPicker(forceRxTone, onForceRxTone, enabled)
     N76SwitchRow("Force TX CTCSS", forceTx, onForceTx, enabled)
@@ -1206,6 +1269,25 @@ private fun N76DebugSettings(
     N76SwitchRow("Speaker monitor", speakerMonitor, onSpeakerMonitor, enabled && audioRfcomm)
     N76SwitchRow("Record HT audio", recordHt, onRecordHt, enabled)
     N76SwitchRow("Record phone mic", recordMic, onRecordMic, enabled)
+    if (recordMic) {
+        // 0 stands for "let Android decide"; a saved mic that is gone reads the same way.
+        ChoiceDropdown(
+            label = "Phone mic",
+            selected = micDeviceId.takeIf { id -> micDevices.any { it.first == id } } ?: 0,
+            options = listOf(0) + micDevices.map { it.first },
+            optionLabel = { id -> micDevices.firstOrNull { it.first == id }?.second ?: "System default" },
+            onSelect = onMicDevice,
+            enabled = enabled
+        )
+        ChoiceDropdown(
+            label = "Phone mic gain",
+            selected = micGainDb,
+            options = N76Settings.MIC_GAINS_DB,
+            optionLabel = { if (it == 0) "None" else "+$it dB" },
+            onSelect = onMicGainDb,
+            enabled = enabled
+        )
+    }
     N76SwitchRow("Auto-record while tracking", recordSatOnly, onRecordSatOnly, enabled)
     Row(
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1247,7 +1329,7 @@ private fun N76CtcssPicker(selected: Int, onSelect: (Int) -> Unit, enabled: Bool
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun <T> ChoiceDropdown(
+internal fun <T> ChoiceDropdown(
     label: String,
     selected: T,
     options: List<T>,
@@ -1288,6 +1370,22 @@ private fun <T> ChoiceDropdown(
         }
     }
 }
+
+/** The inputs a recording can use, as Android device id to a name that tells them apart. */
+private fun phoneMicrophones(audioManager: AudioManager): List<Pair<Int, String>> =
+    audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS).mapNotNull { device ->
+        val kind = when (device.type) {
+            AudioDeviceInfo.TYPE_BUILTIN_MIC -> "Built-in mic"
+            AudioDeviceInfo.TYPE_WIRED_HEADSET -> "Wired headset mic"
+            AudioDeviceInfo.TYPE_USB_DEVICE, AudioDeviceInfo.TYPE_USB_HEADSET -> "USB mic"
+            AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "Bluetooth mic"
+            else -> return@mapNotNull null
+        }
+        // Phones list several built-in mics; the address ("bottom", "back") is what differs.
+        val address = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) device.address else ""
+        val detail = address.ifBlank { device.productName.toString() }
+        device.id to "$kind ($detail)"
+    }
 
 private fun pollLabel(ms: Long): String = when {
     ms < 1000L -> "$ms ms"

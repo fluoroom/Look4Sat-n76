@@ -17,6 +17,7 @@
  */
 package com.rtbishop.look4sat.feature.radar
 
+import com.rtbishop.look4sat.core.domain.model.AprsSettings
 import com.rtbishop.look4sat.core.domain.model.AudioSource
 import com.rtbishop.look4sat.core.domain.model.SatRadio
 import com.rtbishop.look4sat.core.domain.repository.N76RuntimeState
@@ -67,6 +68,7 @@ data class RadarState(
     val radioControl: RadioControlSubState = RadioControlSubState(),
     val n76: N76RuntimeState = N76RuntimeState(),
     val sstv: SstvSubState = SstvSubState(),
+    val aprs: AprsSubState = AprsSubState(),
     val calculatorOffsetKHz: String = ""
 )
 
@@ -83,6 +85,20 @@ data class SstvSubState(
     val audioSourceError: String? = null,
     val needsMediaProjection: Boolean = false,
     val diagnosticsMetrics: SstvQualityMetrics? = null
+)
+
+data class AprsSubState(
+    val settings: AprsSettings = AprsSettings(),
+    val isSending: Boolean = false,
+    val isBeaconing: Boolean = false,
+    val isLocating: Boolean = false,
+    val isListening: Boolean = false,
+    /** Raw packets, oldest first: time, TX or RX, then the frame in TNC2 form. */
+    val log: List<String> = emptyList(),
+    /** Audio outputs as device id to name, read when the list is opened. */
+    val audioOutputs: List<Pair<Int, String>> = emptyList(),
+    /** Outcome of the last send or GPS request, shown under the buttons. */
+    val status: String = ""
 )
 
 sealed interface RadarAction {
@@ -113,6 +129,15 @@ sealed interface RadarAction {
     data class SstvSelectAudioSource(val source: AudioSource) : RadarAction
     data class SstvPermissionResult(val granted: Boolean) : RadarAction
     data class SstvMediaProjectionGranted(val token: Any?) : RadarAction
+
+    // APRS actions
+    data class AprsUpdate(val settings: AprsSettings) : RadarAction
+    data object AprsSend : RadarAction
+    data class AprsSetBeaconing(val on: Boolean) : RadarAction
+    data object AprsLocationFromGps : RadarAction
+    data object AprsLocationDenied : RadarAction
+    data class AprsSetListening(val on: Boolean) : RadarAction
+    data object AprsRefreshAudioOutputs : RadarAction
 
     // Calculator actions
     data class ChangeCalculatorOffset(val offsetKHz: String) : RadarAction

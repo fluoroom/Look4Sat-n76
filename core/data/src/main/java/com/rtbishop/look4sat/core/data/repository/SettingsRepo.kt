@@ -20,9 +20,13 @@ package com.rtbishop.look4sat.core.data.repository
 import android.content.SharedPreferences
 import android.location.Location
 import android.location.LocationManager
+import android.os.CancellationSignal
+import android.os.SystemClock
 import androidx.core.content.edit
 import androidx.core.location.LocationListenerCompat
 import androidx.core.location.LocationManagerCompat
+import com.rtbishop.look4sat.core.domain.model.AprsSettings
+import com.rtbishop.look4sat.core.domain.model.AprsTransport
 import com.rtbishop.look4sat.core.domain.model.AudioSource
 import com.rtbishop.look4sat.core.domain.model.DataSourcesSettings
 import com.rtbishop.look4sat.core.domain.model.DatabaseState
@@ -33,11 +37,13 @@ import com.rtbishop.look4sat.core.domain.model.decodeFilterCategories
 import com.rtbishop.look4sat.core.domain.model.encodeToString
 import com.rtbishop.look4sat.core.domain.model.RCSettings
 import com.rtbishop.look4sat.core.domain.model.N76Settings
+import com.rtbishop.look4sat.core.domain.model.N76TxPower
 import com.rtbishop.look4sat.core.domain.model.RadioControlSettings
 import com.rtbishop.look4sat.core.domain.model.Constants
 import com.rtbishop.look4sat.core.domain.predict.GeoPos
 import com.rtbishop.look4sat.core.domain.repository.ISettingsRepo
 import com.rtbishop.look4sat.core.domain.source.Sources
+import com.rtbishop.look4sat.core.domain.utility.AppClock
 import com.rtbishop.look4sat.core.domain.utility.SatStatusCategory
 import com.rtbishop.look4sat.core.domain.utility.positionToQth
 import com.rtbishop.look4sat.core.domain.utility.qthToPosition
@@ -68,6 +74,7 @@ class SettingsRepo(
     private val keyFilterAosStartMinute = "filterAosStartMinute"
     private val keyFilterAosEndMinute = "filterAosEndMinute"
     private val keyFilterAosInvert = "filterAosInvert"
+    private val keyFilterOnlyAmSatHeard = "filterOnlyAmSatHeard"
     private val keyNumberOfRadios = "numberOfRadios"
     private val keyNumberOfSatellites = "numberOfSatellites"
     private val keyRotatorAddress = "rotatorAddress"
@@ -87,6 +94,9 @@ class SettingsRepo(
     private val keyFilterCategories = "filterCategories"
     private val keyAudioSource = "audioSource"
     private val keyStateOfAutoUpdate = "stateOfAutoUpdate"
+    private val keyAutoUpdateIntervalMin = "autoUpdateIntervalMin"
+    private val keyStateOfAutoGps = "stateOfAutoGps"
+    private val keyStateOfGpsTime = "stateOfGpsTime"
     private val keyStateOfSensors = "stateOfSensors"
     private val keyStateOfSweep = "stateOfSweep"
     private val keyStateOfUtc = "stateOfUtc"
@@ -188,6 +198,7 @@ class SettingsRepo(
         putInt(keyFilterAosEndMinute, settings.aosEndMinute)
         putBoolean(keyFilterAosInvert, settings.invertAosTimeWindow)
         putString(keyFilterCategories, settings.categories.encodeToString())
+        putBoolean(keyFilterOnlyAmSatHeard, settings.onlyAmSatHeard)
         _passesSettings.value = settings
     }
 
@@ -207,7 +218,8 @@ class SettingsRepo(
             aosStartMinute,
             aosEndMinute,
             invertAosTimeWindow,
-            categories
+            categories,
+            preferences.getBoolean(keyFilterOnlyAmSatHeard, false)
         )
     }
 
@@ -259,6 +271,45 @@ class SettingsRepo(
             println("No permissions were given - $exception")
         }
         return true
+    }
+
+    override fun syncWithGps() {
+        val settings = _otherSettings.value
+        if (!settings.stateOfAutoGps && !settings.stateOfGpsTime) return
+        requestGpsLocation(::applyGpsFix)
+    }
+
+    override fun requestGpsFix(onFix: (latitude: Double, longitude: Double) -> Unit): Boolean =
+        requestGpsLocation { fix -> onFix(fix.latitude, fix.longitude) }
+
+    /** One fix from the GPS provider; false when location is off, absent or not permitted. */
+    private fun requestGpsLocation(onFix: (Location) -> Unit): Boolean {
+        if (!LocationManagerCompat.isLocationEnabled(locationManager)) return false
+        try {
+            // Only the GPS provider will do: the others stamp their fixes with the phone's own
+            // clock, which is the very thing the time sync corrects.
+            if (!LocationManagerCompat.hasProvider(locationManager, providerGps)) return false
+            val noCancel: CancellationSignal? = null
+            LocationManagerCompat.getCurrentLocation(locationManager, providerGps, noCancel, { it.run() }) { fix ->
+                if (fix != null) onFix(fix)
+            }
+            return true
+        } catch (exception: SecurityException) {
+            println("No permissions were given - $exception")
+            return false
+        }
+    }
+
+    /** Settings are read again here: the fix can land seconds after it was asked for. */
+    private fun applyGpsFix(fix: Location) {
+        val settings = _otherSettings.value
+        if (settings.stateOfGpsTime) {
+            // The fix carries GPS time as of when it was taken; age it to now on the monotonic clock.
+            val ageMillis = (SystemClock.elapsedRealtimeNanos() - fix.elapsedRealtimeNanos) / 1_000_000L
+            AppClock.offsetMillis = fix.time + ageMillis - System.currentTimeMillis()
+            println("GPS time offset is ${AppClock.offsetMillis} ms")
+        }
+        if (settings.stateOfAutoGps) setStationPosition(fix.latitude, fix.longitude, fix.altitude)
     }
 
     override fun setStationPosition(locator: String): Boolean {
@@ -398,6 +449,9 @@ class SettingsRepo(
             val new = transform(current)
             preferences.edit {
                 putBoolean(keyStateOfAutoUpdate, new.stateOfAutoUpdate)
+                putInt(keyAutoUpdateIntervalMin, new.autoUpdateIntervalMin)
+                putBoolean(keyStateOfAutoGps, new.stateOfAutoGps)
+                putBoolean(keyStateOfGpsTime, new.stateOfGpsTime)
                 putBoolean(keyStateOfSensors, new.stateOfSensors)
                 putBoolean(keyStateOfSweep, new.stateOfSweep)
                 putBoolean(keyStateOfUtc, new.stateOfUtc)
@@ -414,6 +468,8 @@ class SettingsRepo(
             }
             new
         }
+        // Switching GPS time off must take the correction with it, not leave it until restart.
+        if (!_otherSettings.value.stateOfGpsTime) AppClock.offsetMillis = 0L
     }
 
     private fun getOtherSettings(): OtherSettings = OtherSettings(
@@ -430,7 +486,10 @@ class SettingsRepo(
         lowElevation = Double.fromBits(preferences.getLong(keyLowElevation, 15.0.toRawBits())),
         highElevation = Double.fromBits(preferences.getLong(keyHighElevation, 45.0.toRawBits())),
         radarCompassOffset = preferences.getFloat(keyRadarCompassOffset, 0f),
-        radarCompassOffsetElev = preferences.getFloat(keyRadarCompassOffsetElev, 0f)
+        radarCompassOffsetElev = preferences.getFloat(keyRadarCompassOffsetElev, 0f),
+        autoUpdateIntervalMin = preferences.getInt(keyAutoUpdateIntervalMin, OtherSettings.DEFAULT_AUTO_UPDATE_INTERVAL_MIN),
+        stateOfAutoGps = preferences.getBoolean(keyStateOfAutoGps, false),
+        stateOfGpsTime = preferences.getBoolean(keyStateOfGpsTime, false)
     )
     //endregion
 
@@ -552,6 +611,11 @@ class SettingsRepo(
     private val keyN76SendSatInfo = "n76SendSatInfo"
     private val keyN76SatFirmware = "n76SatFirmware"
     private val keyN76PollMs = "n76PollMs"
+    private val keyN76SendPosition = "n76SendPosition"
+    private val keyN76SendTxPower = "n76SendTxPower"
+    private val keyN76TxPower = "n76TxPower"
+    private val keyN76OpenSquelch = "n76OpenSquelch"
+    private val keyN76MicGainDb = "n76MicGainDb"
     private val keyN76ForceRx = "n76ForceRx"
     private val keyN76ForceRxTone = "n76ForceRxTone"
     private val keyN76ForceTx = "n76ForceTx"
@@ -575,6 +639,11 @@ class SettingsRepo(
             putBoolean(keyN76SendSatInfo, settings.sendSatInfo)
             putBoolean(keyN76SatFirmware, settings.satFirmware)
             putLong(keyN76PollMs, settings.pollIntervalMs)
+            putBoolean(keyN76SendPosition, settings.sendPosition)
+            putBoolean(keyN76SendTxPower, settings.sendTxPower)
+            putString(keyN76TxPower, settings.txPower.name)
+            putBoolean(keyN76OpenSquelch, settings.openSquelchOnTrack)
+            putInt(keyN76MicGainDb, settings.micGainDb)
             putBoolean(keyN76ForceRx, settings.forceRxCtcss)
             putInt(keyN76ForceRxTone, settings.forceRxCtcssHzx100)
             putBoolean(keyN76ForceTx, settings.forceTxCtcss)
@@ -606,8 +675,14 @@ class SettingsRepo(
                 ?: if (storedAsCatModel) preferences.getString(keyTxRadioName, null).orEmpty() else "",
             sendSatInfo = preferences.getBoolean(keyN76SendSatInfo, true),
             satFirmware = preferences.getBoolean(keyN76SatFirmware, true),
-            pollIntervalMs = preferences.getLong(keyN76PollMs, 500L)
+            pollIntervalMs = preferences.getLong(keyN76PollMs, N76Settings.POLL_DEFAULT_MS)
                 .coerceIn(N76Settings.POLL_MIN_MS, N76Settings.POLL_MAX_MS),
+            sendPosition = preferences.getBoolean(keyN76SendPosition, true),
+            sendTxPower = preferences.getBoolean(keyN76SendTxPower, false),
+            txPower = N76TxPower.entries.find { it.name == preferences.getString(keyN76TxPower, null) }
+                ?: N76TxPower.High,
+            openSquelchOnTrack = preferences.getBoolean(keyN76OpenSquelch, false),
+            micGainDb = preferences.getInt(keyN76MicGainDb, 0),
             forceRxCtcss = preferences.getBoolean(keyN76ForceRx, false),
             forceRxCtcssHzx100 = preferences.getInt(keyN76ForceRxTone, 0),
             forceTxCtcss = preferences.getBoolean(keyN76ForceTx, false),
@@ -655,5 +730,53 @@ class SettingsRepo(
     override fun setAmSatCallsign(callsign: String) {
         preferences.edit { putString(keyAmSatCallsign, callsign.trim().uppercase(Locale.US)) }
     }
+    //endregion
+
+    //region # APRS settings
+    private val keyAprsCallsign = "aprsCallsign"
+    private val keyAprsMessage = "aprsMessage"
+    private val keyAprsPath = "aprsPath"
+    private val keyAprsLocation = "aprsLocation"
+    private val keyAprsTransport = "aprsTransport"
+    private val keyAprsTncAddress = "aprsTncAddress"
+    private val keyAprsAudioSource = "aprsAudioSource"
+    private val keyAprsAudioOutput = "aprsAudioOutput"
+    private val keyAprsSymbol = "aprsSymbol"
+    private val keyAprsBeaconSeconds = "aprsBeaconSeconds"
+
+    private val _aprsSettings = MutableStateFlow(getAprsSettings())
+    override val aprsSettings: StateFlow<AprsSettings> = _aprsSettings
+
+    override fun updateAprsSettings(settings: AprsSettings) {
+        preferences.edit {
+            putString(keyAprsCallsign, settings.callsign)
+            putString(keyAprsMessage, settings.message)
+            putString(keyAprsPath, settings.path)
+            putString(keyAprsLocation, settings.location)
+            putString(keyAprsTransport, settings.transport.name)
+            putString(keyAprsTncAddress, settings.tncAddress)
+            putString(keyAprsAudioSource, settings.audioSource.name)
+            putInt(keyAprsAudioOutput, settings.audioOutputId)
+            putString(keyAprsSymbol, settings.symbol)
+            putInt(keyAprsBeaconSeconds, settings.beaconSeconds)
+        }
+        _aprsSettings.value = settings
+    }
+
+    /** The callsign starts out as the one already given for AMSAT reports. */
+    private fun getAprsSettings(): AprsSettings = AprsSettings(
+        callsign = preferences.getString(keyAprsCallsign, null) ?: getAmSatCallsign(),
+        message = preferences.getString(keyAprsMessage, null) ?: "",
+        path = preferences.getString(keyAprsPath, null) ?: AprsSettings.DEFAULT_PATH,
+        location = preferences.getString(keyAprsLocation, null) ?: "",
+        transport = AprsTransport.entries.find { it.name == preferences.getString(keyAprsTransport, null) }
+            ?: AprsTransport.N76,
+        tncAddress = preferences.getString(keyAprsTncAddress, null) ?: "",
+        audioSource = AudioSource.entries.find { it.name == preferences.getString(keyAprsAudioSource, null) }
+            ?: AudioSource.Mic,
+        audioOutputId = preferences.getInt(keyAprsAudioOutput, 0),
+        symbol = preferences.getString(keyAprsSymbol, null) ?: AprsSettings.DEFAULT_SYMBOL,
+        beaconSeconds = preferences.getInt(keyAprsBeaconSeconds, 60)
+    )
     //endregion
 }

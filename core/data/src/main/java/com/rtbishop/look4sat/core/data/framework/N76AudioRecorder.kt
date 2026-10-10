@@ -40,9 +40,15 @@ import java.util.Locale
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
+import kotlin.math.pow
+import kotlin.math.roundToInt
 
 /**
  * Records HT audio (tapped from the SBC decoder) and/or phone mic to OGG Opus or WAV.
+ *
+ * The file is always stereo with a fixed layout: phone mic on the left, HT on the right. A source
+ * that is not being recorded leaves its channel silent, so a given channel always means the same
+ * thing whichever sources were switched on.
  */
 class N76AudioRecorder(private val context: Context) {
 
@@ -54,6 +60,7 @@ class N76AudioRecorder(private val context: Context) {
     private var outputFile: File? = null
     private var recordHt = false
     private var recordInput = false
+    private var micGain = 1f
     private var pendingSafUri: Uri? = null
 
     // HT decoded PCM blocks queued from HmLinkAudioReceiver's receive thread
@@ -62,24 +69,25 @@ class N76AudioRecorder(private val context: Context) {
     companion object {
         const val SAMPLE_RATE = 32_000
         private const val BLOCK = 640          // 20 ms at 32 kHz — standard Opus frame
+        private const val CHANNELS = 2         // left = phone mic, right = HT
         private const val BIT_RATE = 64_000
         private const val OPUS_MIME = "audio/opus"
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
 
-    fun start(recordHt: Boolean, recordInput: Boolean, inputDeviceId: Int,
+    fun start(recordHt: Boolean, recordInput: Boolean, inputDeviceId: Int, micGainDb: Int = 0,
               satName: String = "", outputDir: File? = null, safDirUri: Uri? = null,
               fileSuffix: String = "") {
         if (running) { log("rec: already running"); return }
         if (!recordHt && !recordInput) { log("rec: nothing selected"); return }
         this.recordHt = recordHt
         this.recordInput = recordInput
+        this.micGain = 10.0.pow(micGainDb / 20.0).toFloat()
         this.pendingSafUri = safDirUri
         htQueue.clear()
 
-        val channels = if (recordHt && recordInput) 2 else 1
-        val opusEncoder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) findOpusEncoder(channels) else null
+        val opusEncoder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) findOpusEncoder() else null
         val ext = if (opusEncoder != null) "ogg" else "wav"
         val ts = SimpleDateFormat("yyyy-MM-dd-HH-mm-ss", Locale.US).format(Date())
         val satPart = if (satName.isNotEmpty()) "-${satName.replace(Regex("[^A-Za-z0-9._-]"), "_")}" else ""
@@ -93,14 +101,24 @@ class N76AudioRecorder(private val context: Context) {
         dir.mkdirs()
         outputFile = File(dir, "$ts$satPart$sfx.$ext")
 
-        if (recordInput) initAudioRecord(inputDeviceId)
+        if (recordInput) {
+            // Without the microphone permission (gone after a reinstall) the phone mic cannot be
+            // opened. That must cost the mic channel, not the app: carry on with the HT alone.
+            try {
+                initAudioRecord(inputDeviceId)
+            } catch (e: Exception) {
+                log("rec: phone mic unavailable — grant the microphone permission (${e.message ?: e.javaClass.simpleName})")
+                if (!recordHt) return
+                this.recordInput = false
+            }
+        }
         running = true
 
         if (opusEncoder != null) {
-            thread(name = "n76-rec", isDaemon = true) { encodeOpus(opusEncoder, channels) }
+            thread(name = "n76-rec", isDaemon = true) { encodeOpus(opusEncoder) }
         } else {
             log("rec: Opus unavailable — writing WAV")
-            thread(name = "n76-rec", isDaemon = true) { encodeWav(channels) }
+            thread(name = "n76-rec", isDaemon = true) { encodeWav() }
         }
         log("rec: writing ${outputFile!!.name}")
     }
@@ -124,8 +142,19 @@ class N76AudioRecorder(private val context: Context) {
 
     // ── Setup ─────────────────────────────────────────────────────────────────
 
-    private fun findOpusEncoder(channels: Int): String? {
-        val fmt = MediaFormat.createAudioFormat(OPUS_MIME, SAMPLE_RATE, channels).apply {
+    /** Interleaves [frames] frames: [mic] on the left, [ht] on the right, null meaning silence. */
+    private fun interleave(mic: ShortArray?, ht: ShortArray?, htFrames: Int, frames: Int, out: ShortArray) {
+        for (i in 0 until frames) {
+            // The mic is boosted here and clipped rather than wrapped if the boost overshoots.
+            out[i * 2] = if (mic != null) {
+                (mic[i] * micGain).roundToInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+            } else 0
+            out[i * 2 + 1] = if (ht != null && i < htFrames) ht[i] else 0
+        }
+    }
+
+    private fun findOpusEncoder(): String? {
+        val fmt = MediaFormat.createAudioFormat(OPUS_MIME, SAMPLE_RATE, CHANNELS).apply {
             setInteger(MediaFormat.KEY_BIT_RATE, BIT_RATE)
         }
         return MediaCodecList(MediaCodecList.REGULAR_CODECS).findEncoderForFormat(fmt)
@@ -146,17 +175,22 @@ class N76AudioRecorder(private val context: Context) {
                 .firstOrNull { it.id == deviceId }
                 ?.let { rec.preferredDevice = it }
         }
-        rec.startRecording()
+        try {
+            rec.startRecording()
+        } catch (e: IllegalStateException) {
+            rec.release()
+            throw e
+        }
         audioRec = rec
     }
 
     // ── OGG Opus encoder ──────────────────────────────────────────────────────
 
-    private fun encodeOpus(encoderName: String, channels: Int) {
+    private fun encodeOpus(encoderName: String) {
         val file = outputFile ?: return
-        val fmt = MediaFormat.createAudioFormat(OPUS_MIME, SAMPLE_RATE, channels).apply {
+        val fmt = MediaFormat.createAudioFormat(OPUS_MIME, SAMPLE_RATE, CHANNELS).apply {
             setInteger(MediaFormat.KEY_BIT_RATE, BIT_RATE)
-            setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, BLOCK * channels * 2 * 4)
+            setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, BLOCK * CHANNELS * 2 * 4)
         }
 
         var codec: MediaCodec? = null
@@ -224,8 +258,8 @@ class N76AudioRecorder(private val context: Context) {
                 ib.put(((s shr 8) and 0xFF).toByte())
             }
             c.queueInputBuffer(idx, 0, n * 2, ptsUs, 0)
-            // Advance PTS by the duration of mono samples contained in this buffer
-            ptsUs += (n.toLong() / channels) * 1_000_000L / SAMPLE_RATE
+            // Advance PTS by the duration of the frames contained in this buffer
+            ptsUs += (n.toLong() / CHANNELS) * 1_000_000L / SAMPLE_RATE
             drain(false)
         }
 
@@ -247,11 +281,7 @@ class N76AudioRecorder(private val context: Context) {
                             htQueue.poll()?.let { htEnqueue(it) } ?: break
                         }
                         val htN = htConsume(micN)
-
-                        for (i in 0 until micN) {
-                            stereo[i * 2]     = micBuf[i]
-                            stereo[i * 2 + 1] = if (i < htN) htBlock[i] else 0
-                        }
+                        interleave(micBuf, htBlock, htN, micN, stereo)
                         submit(stereo, micN * 2)
                     }
                     recordHt -> {
@@ -261,12 +291,16 @@ class N76AudioRecorder(private val context: Context) {
                         }
                         if (!running) break
                         val n = htConsume(minOf(htLen, BLOCK))
-                        submit(htBlock, n)
+                        interleave(null, htBlock, n, n, stereo)
+                        submit(stereo, n * 2)
                     }
                     recordInput -> {
                         val rec = audioRec ?: break
                         val n = rec.read(micBuf, 0, BLOCK)
-                        if (n > 0) submit(micBuf, n) else Thread.sleep(5)
+                        if (n > 0) {
+                            interleave(micBuf, null, 0, n, stereo)
+                            submit(stereo, n * 2)
+                        } else Thread.sleep(5)
                     }
                 }
             }
@@ -292,12 +326,21 @@ class N76AudioRecorder(private val context: Context) {
 
     // ── WAV PCM fallback ──────────────────────────────────────────────────────
 
-    private fun encodeWav(channels: Int) {
+    private fun encodeWav() {
         val file = outputFile ?: return
         var htBuf = ShortArray(SAMPLE_RATE * 2)
         var htLen = 0
         val micBuf = ShortArray(BLOCK)
+        val stereo = ShortArray(BLOCK * 2)
+        val out = ByteArray(BLOCK * 4)
         var sampleCount = 0L
+
+        /** Writes [frames] interleaved frames from [stereo] as little-endian PCM. */
+        fun write(raf: RandomAccessFile, frames: Int) {
+            ByteBuffer.wrap(out).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().put(stereo, 0, frames * 2)
+            raf.write(out, 0, frames * 4)
+            sampleCount += frames
+        }
 
         fun htEnqueue(blk: ShortArray) {
             if (htLen + blk.size > htBuf.size)
@@ -319,17 +362,9 @@ class N76AudioRecorder(private val context: Context) {
                                 htQueue.poll()?.let { htEnqueue(it) } ?: break
                             }
                             val htN = minOf(htLen, micN)
-                            val out = ByteArray(micN * 4)
-                            for (i in 0 until micN) {
-                                val m = micBuf[i].toInt()
-                                val h = if (i < htN) htBuf[i].toInt() else 0
-                                out[i * 4]     = (m and 0xFF).toByte()
-                                out[i * 4 + 1] = ((m ushr 8) and 0xFF).toByte()
-                                out[i * 4 + 2] = (h and 0xFF).toByte()
-                                out[i * 4 + 3] = ((h ushr 8) and 0xFF).toByte()
-                            }
+                            interleave(micBuf, htBuf, htN, micN, stereo)
                             htBuf.copyInto(htBuf, 0, htN, htLen); htLen -= htN
-                            raf.write(out); sampleCount += micN
+                            write(raf, micN)
                         }
                         recordHt -> {
                             while (htLen < BLOCK && running) {
@@ -337,33 +372,23 @@ class N76AudioRecorder(private val context: Context) {
                             }
                             if (!running) break
                             val n = minOf(htLen, BLOCK)
-                            val out = ByteArray(n * 2)
-                            for (i in 0 until n) {
-                                val s = htBuf[i].toInt()
-                                out[i * 2]     = (s and 0xFF).toByte()
-                                out[i * 2 + 1] = ((s ushr 8) and 0xFF).toByte()
-                            }
+                            interleave(null, htBuf, n, n, stereo)
                             htBuf.copyInto(htBuf, 0, n, htLen); htLen -= n
-                            raf.write(out); sampleCount += n
+                            write(raf, n)
                         }
                         recordInput -> {
                             val rec = audioRec ?: break
                             val n = rec.read(micBuf, 0, BLOCK)
                             if (n > 0) {
-                                val out = ByteArray(n * 2)
-                                for (i in 0 until n) {
-                                    val s = micBuf[i].toInt()
-                                    out[i * 2]     = (s and 0xFF).toByte()
-                                    out[i * 2 + 1] = ((s ushr 8) and 0xFF).toByte()
-                                }
-                                raf.write(out); sampleCount += n
+                                interleave(micBuf, null, 0, n, stereo)
+                                write(raf, n)
                             } else Thread.sleep(5)
                         }
                     }
                 }
-                val dataBytes = sampleCount * channels * 2
+                val dataBytes = sampleCount * CHANNELS * 2
                 raf.seek(0)
-                raf.write(wavHeader(SAMPLE_RATE, channels, dataBytes))
+                raf.write(wavHeader(SAMPLE_RATE, CHANNELS, dataBytes))
             }
         } catch (e: Exception) {
             log("rec: wav error: ${e.message}")

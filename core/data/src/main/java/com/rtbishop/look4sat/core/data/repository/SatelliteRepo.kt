@@ -23,9 +23,14 @@ import com.rtbishop.look4sat.core.domain.predict.GeoPos
 import com.rtbishop.look4sat.core.domain.predict.OrbitalObject
 import com.rtbishop.look4sat.core.domain.predict.OrbitalPass
 import com.rtbishop.look4sat.core.domain.predict.OrbitalPos
+import com.rtbishop.look4sat.core.domain.repository.IAmSatRepository
 import com.rtbishop.look4sat.core.domain.repository.ISatelliteRepo
 import com.rtbishop.look4sat.core.domain.repository.ISettingsRepo
 import com.rtbishop.look4sat.core.domain.source.ILocalSource
+import com.rtbishop.look4sat.core.domain.utility.AmSatNameMatch
+import com.rtbishop.look4sat.core.domain.utility.AppClock
+import com.rtbishop.look4sat.core.domain.utility.HEARD_CATEGORIES
+import com.rtbishop.look4sat.core.domain.utility.amSatKeysReportedAs
 import com.rtbishop.look4sat.core.domain.utility.referencedModes
 import com.rtbishop.look4sat.core.domain.utility.round
 import com.rtbishop.look4sat.core.domain.utility.toDegrees
@@ -48,7 +53,8 @@ import kotlin.time.Duration.Companion.milliseconds
 class SatelliteRepo(
     private val dispatcher: CoroutineDispatcher,
     private val localStorage: ILocalSource,
-    private val settingsRepo: ISettingsRepo
+    private val settingsRepo: ISettingsRepo,
+    private val amSatRepo: IAmSatRepository
 ) : ISatelliteRepo {
 
     private val _passes = MutableStateFlow<List<OrbitalPass>>(emptyList())
@@ -85,13 +91,14 @@ class SatelliteRepo(
             .collect { (selectedIds, settings) ->
                 _satellites.update { localStorage.getEntriesWithIds(selectedIds) }
                 calculatePasses(
-                    time = System.currentTimeMillis(),
+                    time = AppClock.now(),
                     hoursAhead = settings.hoursAhead,
                     minElevation = settings.minElevation,
                     aosStartMinute = settings.aosStartMinute,
                     aosEndMinute = settings.aosEndMinute,
                     invertAosTimeWindow = settings.invertAosTimeWindow,
-                    categories = settings.categories
+                    categories = settings.categories,
+                    onlyAmSatHeard = settings.onlyAmSatHeard
                 )
                 try {
                     val listed = localStorage.getAvailableModes(selectedIds)
@@ -144,7 +151,8 @@ class SatelliteRepo(
         aosStartMinute: Int,
         aosEndMinute: Int,
         invertAosTimeWindow: Boolean,
-        categories: List<FilterCategory>
+        categories: List<FilterCategory>,
+        onlyAmSatHeard: Boolean
     ) {
         _isCalculating.value = true
         // Normalize to the start of the current minute so that coarse 60-second stepping
@@ -155,11 +163,21 @@ class SatelliteRepo(
             val stationPos = settingsRepo.stationPosition.value
             // Emptiness of the *filter* decides, not emptiness of its result: an active filter
             // that matches nothing must yield no passes rather than falling back to every pass.
-            val filteredSatellites = if (categories.none { it.isActive }) {
+            val matchingSatellites = if (categories.none { it.isActive }) {
                 currentSatellites
             } else {
                 val matchingIds = localStorage.getIdsMatchingCategories(categories).toHashSet()
                 currentSatellites.filter { it.data.catnum in matchingIds }
+            }
+            // No AMSAT page (offline, or AMSAT down) means no AMSAT filter, the same call the
+            // satellite list makes: better every pass than an empty list on a working device.
+            val heardKeys = if (onlyAmSatHeard) {
+                amSatRepo.recentStatus()?.amSatKeysReportedAs(HEARD_CATEGORIES)
+            } else null
+            val filteredSatellites = if (heardKeys == null) {
+                matchingSatellites
+            } else {
+                matchingSatellites.filter { AmSatNameMatch.matches(it.data.name, heardKeys) }
             }
             // Compute passes for each satellite in parallel
             val passLists = coroutineScope {
