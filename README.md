@@ -42,9 +42,6 @@ This fork tracks [upstream Look4Sat](https://github.com/rt-bishop/Look4Sat) (cur
 transceiver filter, AMSAT status sorting, filters and per-pass icons, GPS position and time sync,
 and extra SSTV audio sources.
 
-The old satlib HTTP API is gone — the handheld is driven over Bluetooth RFCOMM, with no local
-Hamlib, no HTTP bridge, and no extra companion app.
-
 ### VGC N76 Bluetooth radio control
 
 In **Settings → Bluetooth output**, switch the **N76 device** row on and choose the paired handheld
