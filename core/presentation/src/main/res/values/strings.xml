@@ -83,12 +83,9 @@
         \n\nPlease update the database at least weekly to get accurate predictions.</string>
     <string name="pass_whatsnew_title" translatable="false">What\'s new in Look4Sat</string>
     <string name="pass_whatsnew_message" translatable="false">
-        * The Moon, as a satellite. Half a joke, entirely real: select it like any other, get its
-        next three moonrises in the pass list whatever the filters say, and track it with
-        Doppler-corrected EME frequencies (CW and JT65/Q65, 6 m to 1.2 cm). Computed on the
-        phone, parallax included, nothing to download.
-        \n\n* AMSAT: Last heard and Best heard now both rank heard, then beacon/telemetry only,
-        then no data, then not heard. A Not Heard report counts as a report, not a reception.
+        * Transceiver filter: each category can now name satellites (comma separated) next to
+        its modes and bands. Names match when the satellite name includes them, or only the whole
+        name with Exact name match on. A names-only category keeps or drops those satellites.
     </string>
 
     <!-- AMSAT Status screen -->
