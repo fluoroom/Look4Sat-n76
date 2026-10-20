@@ -82,13 +82,10 @@
         \n\nPlease update the database at least weekly to get accurate predictions.</string>
     <string name="pass_whatsnew_title" translatable="false">What\'s new in Look4Sat</string>
     <string name="pass_whatsnew_message" translatable="false">
-        * Transceiver filter: each category can now name satellites (comma separated) next to
-        its modes and bands. Names match when the satellite name includes them, or only the whole
-        name with Exact name match on. A names-only category keeps or drops those satellites.
-        \n\n* Merged upstream v4.4.9:
-        \n\n* Tweaked SSTV image saving flow, added permissions #264
+        * Merged upstream v4.4.9
         \n\n* Fixed linear Doppler calculator and offset restore #265
-        \n\n* Corrected CelestialComputer moon calculations error #266
+        \n\n* Moon position corrected: right ascension quadrant and topocentric elevation #266
+        \n\n* SSTV image saving asks for storage permission on older Android #264
         \n\n* Added Look4Sat-rPi project ref to app Settings/README #267
     </string>
 
