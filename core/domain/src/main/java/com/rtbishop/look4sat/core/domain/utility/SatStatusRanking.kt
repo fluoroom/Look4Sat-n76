@@ -28,30 +28,36 @@ enum class SatStatusSort { Name, LastHeard, BestHeard }
 const val STATUS_SLOT_HOURS = 2
 
 /**
+ * Where a satellite stands before its score is looked at, weakest first so [ordinal] can be
+ * compared directly: heard > telemetry/beacon, then (below the line of anything usable) no data,
+ * then reported only as not heard.
+ */
+enum class SatStatusTier { NotHeard, NoData, TelemetryOnly, Heard }
+
+/**
  * What the reports say about one satellite.
  *
  * "Not Heard" and conflicting reports are deliberately left out of the count: they are often
  * filed for a pass that was never going to work, so counting them would punish a healthy
  * satellite for its observers' luck rather than for its own payload. For the same reason they
- * are no evidence of when a satellite was last heard, so they earn it nothing but a place just
- * above the satellites nobody reported on at all, see [trustTier].
+ * are no evidence of when a satellite was last heard. A "Not Heard" report is still a report,
+ * though: a satellite that only ever got those ranks below one nobody reported on, see [tier].
  */
 data class SatStatusRating(
     val heard: Int,
     val telemetryOnly: Int,
     /** Index of the newest slot holding a heard or telemetry report; -1 when there is none. */
     val freshnessRank: Int,
-    /** Index of the newest slot holding a report of any kind; -1 when the satellite has none. */
-    val anyReportRank: Int = freshnessRank
+    val notHeard: Int = 0
 ) {
     val sampleCount: Int get() = heard + telemetryOnly
 
-    /** 2 = heard or telemetry on record, 1 = reported on but never heard, 0 = no data. */
-    val trustTier: Int
+    val tier: SatStatusTier
         get() = when {
-            sampleCount > 0 -> 2
-            anyReportRank >= 0 -> 1
-            else -> 0
+            heard > 0 -> SatStatusTier.Heard
+            telemetryOnly > 0 -> SatStatusTier.TelemetryOnly
+            notHeard > 0 -> SatStatusTier.NotHeard
+            else -> SatStatusTier.NoData
         }
 
     /** Share of usable reports that were voice-grade. Null when nothing usable came in. */
@@ -73,6 +79,7 @@ fun SatStatus.rate(reports: Map<String, SatReport>): SatStatusRating {
     val slots = days.flatMap { it.slots }
     var heard = 0
     var telemetryOnly = 0
+    var notHeard = 0
     var freshnessRank = -1
     slots.forEachIndexed { index, slot ->
         for (id in slot.reportIds) {
@@ -81,12 +88,13 @@ fun SatStatus.rate(reports: Map<String, SatReport>): SatStatusRating {
                 SatStatusCategory.Active -> heard++
                 SatStatusCategory.TelemetryOnly -> telemetryOnly++
                 // "Not Heard" and conflicting reports stay out of the count, see SatStatusRating.
-                SatStatusCategory.NotHeard, SatStatusCategory.Conflicting -> continue
+                SatStatusCategory.NotHeard -> { notHeard++; continue }
+                SatStatusCategory.Conflicting -> continue
             }
             if (freshnessRank < 0) freshnessRank = index
         }
     }
-    return SatStatusRating(heard, telemetryOnly, freshnessRank, slots.indexOfFirst { it.count > 0 })
+    return SatStatusRating(heard, telemetryOnly, freshnessRank, notHeard)
 }
 
 /**
@@ -158,26 +166,26 @@ fun SatStatusPage.bestCategories(satelliteNames: Collection<String>): Map<String
 }
 
 /**
- * Orders the list for display. The data-driven orderings rank by [SatStatusRating.trustTier]
- * first: satellites that were heard, then the ones only ever reported as not heard, then the
- * ones with no data, so neither of the last two floats to the top on an empty score.
+ * Orders the list for display. Both data-driven orderings rank by [SatStatusRating.tier] first
+ * (heard, then telemetry, then no data, then not heard) and only then by their own score, so no
+ * data and not heard never float to the top on an empty score.
  */
 fun List<SatStatus>.sortedForDisplay(
     sort: SatStatusSort,
     ratings: Map<String, SatStatusRating>
 ): List<SatStatus> {
     val byName = compareBy<SatStatus> { it.name.lowercase() }
-    val byTrustTier = compareByDescending<SatStatus> { ratings[it.name]?.trustTier ?: 0 }
+    val tierOf = { status: SatStatus -> ratings[status.name]?.tier ?: SatStatusTier.NoData }
     return when (sort) {
         SatStatusSort.Name -> sortedWith(byName)
         SatStatusSort.LastHeard -> sortedWith(
-            byTrustTier
+            compareByDescending<SatStatus> { tierOf(it).ordinal }
                 // -1 means "never heard": map it past every real rank instead of ahead of them.
                 .thenBy { ratings[it.name]?.freshnessRank?.takeIf { rank -> rank >= 0 } ?: Int.MAX_VALUE }
                 .then(byName)
         )
         SatStatusSort.BestHeard -> sortedWith(
-            byTrustTier
+            compareByDescending<SatStatus> { tierOf(it).ordinal }
                 .thenByDescending { ratings[it.name]?.rankingScore ?: 0.0 }
                 .thenByDescending { ratings[it.name]?.sampleCount ?: 0 }
                 .then(byName)

@@ -36,12 +36,19 @@ data class OrbitalData(
     val xmo: Double = meanan * DEG2RAD
     val xno: Double = meanmo * TWO_PI / MIN_PER_DAY
     val orbitalPeriod: Double = MIN_PER_DAY / meanmo
-    val isDeepSpace: Boolean = orbitalPeriod >= 225.0 // NearEarth (period < 225 min) or DeepSpace (period >= 225 min)
+    val isMoon: Boolean = catnum == MOON_CATNUM
+    // NearEarth (period < 225 min) or DeepSpace (period >= 225 min). The Moon is neither: it rises
+    // and sets like a low satellite, and "deep space" means "parked in the sky" to the rest of the app.
+    val isDeepSpace: Boolean = !isMoon && orbitalPeriod >= 225.0
 
     /** Absolute age of this element set, used to pick the freshest data among several sources. */
     val epochDaynum: Double = epochToDaynum(epoch)
 
-    fun getObject(): OrbitalObject = if (isDeepSpace) DeepSpaceObject(this) else NearEarthObject(this)
+    fun getObject(): OrbitalObject = when {
+        isMoon -> MoonObject(this)
+        isDeepSpace -> DeepSpaceObject(this)
+        else -> NearEarthObject(this)
+    }
 
     /** Check if satellite has likely decayed by the given time. */
     fun hasDecayed(currentTimeMillis: Long): Boolean {

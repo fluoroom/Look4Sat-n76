@@ -50,6 +50,9 @@ import kotlinx.coroutines.withContext
 import java.util.TimeZone
 import kotlin.time.Duration.Companion.milliseconds
 
+/** How many Moon passes are always listed. */
+private const val MOON_PASSES = 3
+
 class SatelliteRepo(
     private val dispatcher: CoroutineDispatcher,
     private val localStorage: ILocalSource,
@@ -181,7 +184,7 @@ class SatelliteRepo(
             }
             // Compute passes for each satellite in parallel
             val passLists = coroutineScope {
-                filteredSatellites.map { satellite ->
+                filteredSatellites.filterNot { it.data.isMoon }.map { satellite ->
                     async { satellite.getPasses(stationPos, normalizedTime, hoursAhead) }
                 }.awaitAll()
             }
@@ -201,6 +204,11 @@ class SatelliteRepo(
                         newPasses.add(pass)
                     }
                 }
+            }
+            // The Moon always shows its next passes, whatever the window and the filters say.
+            currentSatellites.firstOrNull { it.data.isMoon }?.let { moon ->
+                moon.getPasses(stationPos, normalizedTime, 0, MOON_PASSES)
+                    .filter { it.losTime > time }.take(MOON_PASSES).let(newPasses::addAll)
             }
             newPasses.sortBy { it.aosTime }
             delay(1000.milliseconds) // Simulate loading time for better UX
@@ -232,10 +240,13 @@ class SatelliteRepo(
         return if (invertAosTimeWindow) !inRange else inRange
     }
 
-    private fun OrbitalObject.getPasses(pos: GeoPos, time: Long, hours: Int): List<OrbitalPass> {
+    /**
+     * Passes from [time] until [hours] ahead, and past that until at least [minUpcoming] of them
+     * are still to end. [time] is the start of a minute, so a pass ending within it is not counted.
+     */
+    private fun OrbitalObject.getPasses(pos: GeoPos, time: Long, hours: Int, minUpcoming: Int = 0): List<OrbitalPass> {
         val passes = mutableListOf<OrbitalPass>()
         val endDate = time + hours * 60L * 60L * 1000L
-        val quarterOrbitMin = (this.data.orbitalPeriod / 4.0).toInt()
         val decayed = this.data.hasDecayed(time)
         var startDate = time
         var shouldRewind = true
@@ -250,9 +261,9 @@ class SatelliteRepo(
                     val pass = getLeoPass(this, pos, startDate, shouldRewind, decayed)
                     lastAosDate = pass.aosTime
                     passes.add(pass)
-                    startDate = pass.losTime + (quarterOrbitMin * 3) * 60L * 1000L
+                    startDate = pass.losTime + this.skipAfterLosMillis()
                     count++
-                } while (lastAosDate < endDate)
+                } while (lastAosDate < endDate || passes.count { it.losTime > time + 60_000L } < minUpcoming)
             }
         }
         return passes
@@ -268,13 +279,27 @@ class SatelliteRepo(
         return OrbitalPass(aos, az, los, az, alt.toInt(), elev, sat, hasDecayed = decayed)
     }
 
+    /**
+     * How far back the search starts, so that a pass already under way is found. A quarter orbit
+     * covers any LEO pass, but the Moon can stay up for most of its lunar day: rewind all of it.
+     */
+    private fun OrbitalObject.rewindMillis(): Long =
+        if (data.isMoon) (data.orbitalPeriod * 60_000L).toLong() else quarterOrbitMillis()
+
+    /**
+     * How far past a LOS the next AOS can safely be looked for. Three quarters of an orbit for a
+     * satellite, but none for the Moon: at high latitudes it can be down for only a few hours of
+     * its lunar day, and skipping ahead would jump over a whole moonrise.
+     */
+    private fun OrbitalObject.skipAfterLosMillis(): Long = if (data.isMoon) 0L else quarterOrbitMillis() * 3
+
+    private fun OrbitalObject.quarterOrbitMillis(): Long = (data.orbitalPeriod / 4.0).toInt() * 60L * 1000L
+
     private fun getLeoPass(sat: OrbitalObject, pos: GeoPos, time: Long, rewind: Boolean, decayed: Boolean): OrbitalPass {
-        val quarterOrbitMin = (sat.data.orbitalPeriod / 4.0).toInt()
         var calendarTimeMillis = time
         var elevation: Double
         var maxElevation = 0.0
-        // rewind 1/4 of an orbit
-        if (rewind) calendarTimeMillis -= quarterOrbitMin * 60L * 1000L
+        if (rewind) calendarTimeMillis -= sat.rewindMillis()
 
         // Use lightweight elevation check for coarse searching
         if (sat.getElevation(pos, calendarTimeMillis) > 0.0) {
@@ -282,8 +307,7 @@ class SatelliteRepo(
             do {
                 calendarTimeMillis += 30 * 1000L
             } while (sat.getElevation(pos, calendarTimeMillis) > 0.0)
-            // move forward 3/4 of an orbit
-            calendarTimeMillis += quarterOrbitMin * 3 * 60L * 1000L
+            calendarTimeMillis += sat.skipAfterLosMillis()
         }
 
         // find the next time sat comes above the horizon (coarse: 60s steps)

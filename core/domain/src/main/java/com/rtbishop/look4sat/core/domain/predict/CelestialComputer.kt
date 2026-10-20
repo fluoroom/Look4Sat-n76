@@ -131,7 +131,80 @@ object CelestialComputer {
     fun getMoonPosition(observer: GeoPos, timeMillis: Long): MoonPosition {
         val daynum = millisToDaynum(timeMillis)
         val jd = daynum + 2444238.5
-        var t = (jd - 2415020.0) / 36525.0
+        val (l, bt, p) = moonEcliptic(jd)
+
+        val bRad = bt * DEG2RAD
+        val lm = l * DEG2RAD
+        val moonDx = 3.0 / (PI * p)
+
+        // Ecliptic → equatorial
+        val ob = eclipticObliquity(jd)
+        val dec = asin(sin(bRad) * cos(ob) + cos(bRad) * sin(ob) * sin(lm))
+        var ra = acos(cos(bRad) * cos(lm) / cos(dec)); if (lm > PI) ra = TWO_PI - ra
+
+        val n = observer.latitude * DEG2RAD
+        val t = (jd - 2451545.0) / 36525.0
+        var teg = 280.46061837 + 360.98564736629 * (jd - 2451545.0) + (0.000387933 * t - t * t / 38710000.0) * t
+        while (teg > 360.0) teg -= 360.0
+        // LST = GMST + east longitude (positive east convention)
+        val th = mod2PI((teg + observer.longitude) * DEG2RAD)
+        val h = th - ra
+        val azVal = atan2(sin(h), cos(h) * sin(n) - tan(dec) * cos(n)) + PI
+        val el = asin(sin(n) * sin(dec) + cos(n) * cos(dec) * cos(h))
+
+        // Moon radial velocity approximation (from "Amateur Radio Software", GM4ANB, RSGB 1985)
+        val mm = fixAngle(1.319238 + daynum * 0.228027135)
+        val radT2 = 0.10976
+        val radT1 = mm + radT2 * sin(mm)
+        var dv = 0.01255 * moonDx * moonDx * sin(radT1) * (1.0 + radT2 * cos(mm))
+        dv *= 4449.0
+        val earthR = 6378.0
+        val moonDist = 384401.0
+        val radT3 = earthR * moonDist * (cos(dec) * cos(n) * sin(h)) /
+            sqrt(moonDist * moonDist - moonDist * earthR * sin(el))
+        val moonDv = dv + radT3 * 0.0753125
+
+        val moonRa = ra / DEG2RAD
+        var moonGha = teg - moonRa
+        if (moonGha < 0.0) moonGha += 360.0
+
+        return MoonPosition(
+            azimuth = azVal / DEG2RAD,
+            elevation = el / DEG2RAD,
+            rightAscension = moonRa,
+            declination = dec / DEG2RAD,
+            gha = moonGha,
+            angularDiameter = moonDx,
+            radialVelocity = moonDv
+        )
+    }
+
+    /**
+     * The Moon's geocentric position in km, in the equator-and-equinox-of-date frame the SGP4
+     * propagators work in, so the Moon can go through the same observer maths as a satellite
+     * (topocentric parallax and range rate included, which matter for EME pointing and Doppler).
+     */
+    internal fun moonPositionEci(julianUtc: Double): DoubleArray {
+        val (l, b, p) = moonEcliptic(julianUtc)
+        // Horizontal parallax is the angle Earth's equatorial radius subtends at the Moon.
+        val r = EARTH_RADIUS / sin(p * DEG2RAD)
+        val lon = l * DEG2RAD
+        val lat = b * DEG2RAD
+        val ob = eclipticObliquity(julianUtc)
+        val xe = r * cos(lat) * cos(lon)
+        val ye = r * cos(lat) * sin(lon)
+        val ze = r * sin(lat)
+        return doubleArrayOf(xe, ye * cos(ob) - ze * sin(ob), ye * sin(ob) + ze * cos(ob))
+    }
+
+    private fun eclipticObliquity(jd: Double): Double {
+        val z = (jd - 2415020.5) / 365.2422
+        return (23.452294 - (0.46845 * z + 5.9e-07 * z * z) / 3600.0).toRadians()
+    }
+
+    /** Ecliptic longitude, latitude and horizontal parallax of the Moon in degrees at [jd]. */
+    private fun moonEcliptic(jd: Double): DoubleArray {
+        val t = (jd - 2415020.0) / 36525.0
         val t2 = t * t
         val t3 = t2 * t
 
@@ -227,52 +300,7 @@ object CelestialComputer {
         p -= 0.00003 * cos(m1R + dR) - 0.000029 * cos(2 * ffR - 2 * dR) - ex * 0.000029 * cos(2 * m1R + mR)
         p += ex * ex * 0.000026 * cos(2 * dR - 2 * mR) - 0.000023 * cos(2 * ffR - 2 * dR + m1R)
         p += ex * 0.000019 * cos(4 * dR - mR - m1R)
-
-        val bRad = bt * DEG2RAD
-        val lm = l * DEG2RAD
-        val moonDx = 3.0 / (PI * p)
-
-        // Ecliptic → equatorial
-        val z = (jd - 2415020.5) / 365.2422
-        val ob = (23.452294 - (0.46845 * z + 5.9e-07 * z * z) / 3600.0).toRadians()
-        val dec = asin(sin(bRad) * cos(ob) + cos(bRad) * sin(ob) * sin(lm))
-        var ra = acos(cos(bRad) * cos(lm) / cos(dec)); if (lm > PI) ra = TWO_PI - ra
-
-        val n = observer.latitude * DEG2RAD
-        t = (jd - 2451545.0) / 36525.0
-        var teg = 280.46061837 + 360.98564736629 * (jd - 2451545.0) + (0.000387933 * t - t * t / 38710000.0) * t
-        while (teg > 360.0) teg -= 360.0
-        // LST = GMST + east longitude (positive east convention)
-        val th = mod2PI((teg + observer.longitude) * DEG2RAD)
-        val h = th - ra
-        val azVal = atan2(sin(h), cos(h) * sin(n) - tan(dec) * cos(n)) + PI
-        val el = asin(sin(n) * sin(dec) + cos(n) * cos(dec) * cos(h))
-
-        // Moon radial velocity approximation (from "Amateur Radio Software", GM4ANB, RSGB 1985)
-        val mm = fixAngle(1.319238 + daynum * 0.228027135)
-        val radT2 = 0.10976
-        val radT1 = mm + radT2 * sin(mm)
-        var dv = 0.01255 * moonDx * moonDx * sin(radT1) * (1.0 + radT2 * cos(mm))
-        dv *= 4449.0
-        val earthR = 6378.0
-        val moonDist = 384401.0
-        val radT3 = earthR * moonDist * (cos(dec) * cos(n) * sin(h)) /
-            sqrt(moonDist * moonDist - moonDist * earthR * sin(el))
-        val moonDv = dv + radT3 * 0.0753125
-
-        val moonRa = ra / DEG2RAD
-        var moonGha = teg - moonRa
-        if (moonGha < 0.0) moonGha += 360.0
-
-        return MoonPosition(
-            azimuth = azVal / DEG2RAD,
-            elevation = el / DEG2RAD,
-            rightAscension = moonRa,
-            declination = dec / DEG2RAD,
-            gha = moonGha,
-            angularDiameter = moonDx,
-            radialVelocity = moonDv
-        )
+        return doubleArrayOf(l, bt, p)
     }
 
     // ── Satellite visibility ──

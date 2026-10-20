@@ -19,10 +19,14 @@ package com.rtbishop.look4sat.core.data.source
 
 import com.rtbishop.look4sat.core.data.database.Look4SatDao
 import com.rtbishop.look4sat.core.data.database.RadioBandInfo
+import com.rtbishop.look4sat.core.domain.model.SatItem
 import com.rtbishop.look4sat.core.domain.model.SatRadio
+import com.rtbishop.look4sat.core.domain.predict.MOON_CATNUM
+import com.rtbishop.look4sat.core.domain.predict.MOON_ORBITAL_DATA
 import com.rtbishop.look4sat.core.domain.predict.OrbitalData
 import com.rtbishop.look4sat.core.domain.predict.OrbitalObject
 import com.rtbishop.look4sat.core.domain.source.ILocalSource
+import com.rtbishop.look4sat.core.domain.source.Sources
 import com.rtbishop.look4sat.core.domain.model.FilterCategory
 import com.rtbishop.look4sat.core.domain.utility.matchesFilterCategories
 import com.rtbishop.look4sat.core.domain.utility.matchesTransponderFilter
@@ -36,7 +40,10 @@ class LocalSource(private val look4SatDao: Look4SatDao) : ILocalSource {
 
     override suspend fun getEntriesTotal() = look4SatDao.getEntriesTotal()
 
-    override suspend fun getEntriesList() = look4SatDao.getEntriesList()
+    // The Moon is no database entry: it is computed, never downloaded, so it is always listed,
+    // whatever the updates and "clear data" leave behind.
+    override suspend fun getEntriesList() =
+        look4SatDao.getEntriesList() + SatItem(MOON_CATNUM, MOON_ORBITAL_DATA.name)
 
     override suspend fun getEntriesWithIds(ids: List<Int>): List<OrbitalObject> {
         val selectedOrbitalObjects = mutableListOf<OrbitalObject>()
@@ -44,6 +51,7 @@ class LocalSource(private val look4SatDao: Look4SatDao) : ILocalSource {
             val entries = look4SatDao.getEntriesWithIds(idsPart)
             selectedOrbitalObjects.addAll(entries.toDomain().map { entry -> entry.getObject() })
         }
+        if (MOON_CATNUM in ids) selectedOrbitalObjects.add(MOON_ORBITAL_DATA.getObject())
         return selectedOrbitalObjects
     }
 
@@ -91,13 +99,14 @@ class LocalSource(private val look4SatDao: Look4SatDao) : ILocalSource {
 
     // Scan ~thousands of radios in memory. Fine at current DB size; move to SQL if this grows.
     private suspend fun catnumsMatching(predicate: (RadioBandInfo) -> Boolean): List<Int> =
-        look4SatDao.getRadiosForFilter()
+        (look4SatDao.getRadiosForFilter() + moonRadioBands)
             .mapNotNull { radio -> radio.catnum?.takeIf { predicate(radio) } }
             .distinct()
 
     override suspend fun getAvailableModes(ids: List<Int>): List<String> {
         if (ids.isEmpty()) return emptyList()
-        val modes = ids.chunked(999).flatMap { look4SatDao.getModesForIds(it) }.distinct().sorted()
+        val moonModes = if (MOON_CATNUM in ids) Sources.moonRadios.mapNotNull { it.downlinkMode } else emptyList()
+        val modes = (ids.chunked(999).flatMap { look4SatDao.getModesForIds(it) } + moonModes).distinct().sorted()
         val aprsIds = look4SatDao.getIdsWithAprs().toHashSet()
         return if (ids.any { it in aprsIds }) (modes + "APRS").sorted() else modes
     }
@@ -123,7 +132,12 @@ class LocalSource(private val look4SatDao: Look4SatDao) : ILocalSource {
     override suspend fun getRadiosTotal() = look4SatDao.getRadiosTotal()
 
     override suspend fun getRadiosWithId(id: Int): List<SatRadio> {
+        if (id == MOON_CATNUM) return Sources.moonRadios
         return look4SatDao.getRadiosWithId(id).toDomainRadios()
+    }
+
+    private val moonRadioBands = Sources.moonRadios.map { radio ->
+        RadioBandInfo(radio.catnum, radio.downlinkLow, radio.uplinkLow, radio.downlinkMode, radio.info)
     }
 
     override suspend fun insertRadios(radios: List<SatRadio>, isCustom: Boolean) {

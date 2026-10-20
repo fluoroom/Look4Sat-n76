@@ -40,7 +40,7 @@ It is now and always will be completely ad-free and open-source.
 This fork tracks [upstream Look4Sat](https://github.com/rt-bishop/Look4Sat) (currently merged up to
 **v4.4.11**) and adds **direct VGC N76 Bluetooth radio control**, an **APRS** tab, a category-based
 transceiver filter, AMSAT status sorting, filters and per-pass icons, GPS position and time sync,
-and extra SSTV audio sources.
+extra SSTV audio sources, and the Moon as a satellite.
 
 ### VGC N76 Bluetooth radio control
 
@@ -119,9 +119,11 @@ dragging telemetry in. Pinning the band to the mode per category keeps the two b
 
 ### AMSAT status: sorting, filters and pass icons
 
-The AMSAT status list can be sorted by **Name**, **Last heard**, or **Best heard**. Both rank
-satellites that were heard first, then those only ever reported as not heard, then those with no
-reports: a "Not Heard" report is never taken as the time a satellite was last heard.
+The AMSAT status list can be sorted by **Name**, **Last heard**, or **Best heard**. Both rank in
+the same order before anything else: **heard > beacon/telemetry only > no data > not heard**. A
+"Not Heard" report counts as a report, never as a reception: it is not taken as the time a satellite
+was last heard, and a satellite that only ever got those ranks below one nobody reported on.
+Conflicting reports alone count as no data.
 
 The pass filter has an **Only AMSAT heard** switch (heard or beacon/telemetry only), and every
 pass in the list carries an icon: tick for heard, radio for beacon only, cross for not heard, dot
@@ -135,6 +137,28 @@ the percentage shown is the true ratio, with the sample count beside it.
 > There is no time-range option. The AMSAT API clamps reports to the most recent 500 (~33 h),
 > ignores a wider `hours` parameter, and offers no pagination, so 1-week/1-month/1-year choices
 > would all rank identical data. Widening the window needs locally accumulated history.
+
+### The Moon
+
+Half a joke, entirely real: the Moon is in the satellite list as **Moon**, and it is selected,
+predicted and tracked like any other satellite. It is also the oldest passive repeater there is.
+
+* **Position** comes from the lunar ephemeris already in the app (Meeus, from PREDICT), computed
+  on the phone: nothing is downloaded, and updates or "clear data" never remove it. It runs
+  through the same observer maths as a satellite, so azimuth and elevation include the topocentric
+  parallax (up to ~1°, which matters to a dish), and the range rate drives the usual Doppler.
+* **Passes**: the next three moonrises are always listed while the Moon is selected, whatever the
+  hours-ahead window, minimum elevation, AOS time window or filters say.
+* **Transceivers**: the common EME activity frequencies, CW low in each EME segment and JT65/Q65
+  (USB) above it, on 6 m, 2 m, 70 cm, 23 cm and 13 cm up to 1.2 cm. Uplink and downlink are the
+  same frequency, so the correction keeps the signal constant at the Moon (CFOM, the WSJT-X
+  default) and each station tunes out its own half of the Doppler.
+* It has no NORAD number, so it uses **-301** (its NAIF id, negated so no catalogue can collide).
+
+> The frequencies follow common practice and proposals, not one adopted band plan: check your
+> national band plan. The radar still draws its Moon icon, so with the Moon selected the icon and
+> its track coincide. EME takes antenna gain and power that the tracking side of this app cannot
+> help with.
 
 ### Data updates, GPS position and GPS time
 

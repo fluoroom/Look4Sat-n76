@@ -64,7 +64,8 @@ abstract class OrbitalObject(val data: OrbitalData) {
     private val julEpoch: Double = juliandDateOfEpoch(data.epoch)
 
     fun willBeSeen(pos: GeoPos): Boolean {
-        return if (data.meanmo < 1e-8) false
+        return if (data.isMoon) true
+        else if (data.meanmo < 1e-8) false
         else {
             val sma = 331.25 * exp(ln(MIN_PER_DAY / data.meanmo) * (2.0 / 3.0))
             val apogee = sma * (1.0 + data.eccn) - EARTH_RADIUS
@@ -80,7 +81,7 @@ abstract class OrbitalObject(val data: OrbitalData) {
         julUTC = calcCurrentDaynum(time) + 2444238.5
         // Calculate time since epoch in minutes
         val tsince = (julUTC - julEpoch) * MIN_PER_DAY
-        calculateSDP4orSGP4(tsince)
+        propagate(julUTC, tsince)
         // Scale position and velocity vectors to km and km/sec
         convertSatState(position, velocity)
         // Calculate velocity of satellite
@@ -102,7 +103,7 @@ abstract class OrbitalObject(val data: OrbitalData) {
     fun getElevation(pos: GeoPos, time: Long): Double {
         julUTC = calcCurrentDaynum(time) + 2444238.5
         val tsince = (julUTC - julEpoch) * MIN_PER_DAY
-        calculateSDP4orSGP4(tsince)
+        propagate(julUTC, tsince)
         convertSatState(position, velocity)
         magnitude(velocity)
         calculateObs(julUTC, position, velocity, pos, squintVector)
@@ -117,7 +118,7 @@ abstract class OrbitalObject(val data: OrbitalData) {
         orbitalPos = OrbitalPos()
         julUTC = calcCurrentDaynum(time) + 2444238.5
         val tsince = (julUTC - julEpoch) * MIN_PER_DAY
-        calculateSDP4orSGP4(tsince)
+        propagate(julUTC, tsince)
         convertSatState(position, velocity)
         magnitude(velocity)
         calculateObs(julUTC, position, velocity, pos, squintVector)
@@ -149,9 +150,17 @@ abstract class OrbitalObject(val data: OrbitalData) {
         return i + 1720994.5 + b
     }
 
-    private fun calculateSDP4orSGP4(tsince: Double) {
+    /** Sets the ECI state for [julianUtc]; a body with an ephemeris of its own overrides this. */
+    internal open fun propagate(julianUtc: Double, tsince: Double) {
         if (data.isDeepSpace) (this as DeepSpaceObject).calculateSDP4(tsince)
         else (this as NearEarthObject).calculateSGP4(tsince)
+    }
+
+    /** Takes an ECI state in km and km/s, in the propagators' units of Earth radii and radii per minute. */
+    internal fun setEciState(x: Double, y: Double, z: Double, vx: Double, vy: Double, vz: Double) {
+        val velocityScale = SEC_PER_DAY / MIN_PER_DAY / EARTH_RADIUS
+        position.setXYZ(x / EARTH_RADIUS, y / EARTH_RADIUS, z / EARTH_RADIUS)
+        velocity.setXYZ(vx * velocityScale, vy * velocityScale, vz * velocityScale)
     }
 
     // Converts the sat position and velocity vectors to km and km/sec

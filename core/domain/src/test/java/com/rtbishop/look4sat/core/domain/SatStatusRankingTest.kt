@@ -5,6 +5,7 @@ import com.rtbishop.look4sat.core.domain.model.SatReport
 import com.rtbishop.look4sat.core.domain.model.SatSlot
 import com.rtbishop.look4sat.core.domain.model.SatStatus
 import com.rtbishop.look4sat.core.domain.utility.SatStatusSort
+import com.rtbishop.look4sat.core.domain.utility.SatStatusTier
 import com.rtbishop.look4sat.core.domain.utility.rate
 import com.rtbishop.look4sat.core.domain.utility.rateAll
 import com.rtbishop.look4sat.core.domain.utility.sortedForDisplay
@@ -56,15 +57,15 @@ class SatStatusRankingTest {
         assertEquals(0, rating.sampleCount)
         // It was reported on, but a Not Heard report says nothing about when it was last heard.
         assertNull(rating.hoursSinceLastReport)
-        assertEquals(0, rating.anyReportRank)
-        assertEquals(1, rating.trustTier)
+        assertEquals(1, rating.notHeard)
+        assertEquals(SatStatusTier.NotHeard, rating.tier)
     }
 
     @Test
     fun `a newer Not Heard report does not refresh the last-heard time`() {
         val rating = sat("FADING", listOf("Not Heard"), emptyList(), listOf("Heard")).rate(reports)
         assertEquals(2, rating.freshnessRank)
-        assertEquals(0, rating.anyReportRank)
+        assertEquals(SatStatusTier.Heard, rating.tier)
     }
 
     @Test
@@ -96,24 +97,48 @@ class SatStatusRankingTest {
     @Test
     fun `satellites with no usable reports sink to the bottom of the best-heard sort`() {
         val good = sat("GOOD", listOf("Heard", "Heard"))
-        val silent = sat("AAA-SILENT")
-        val onlyNotHeard = sat("BBB-NOTHEARD", listOf("Not Heard"))
-        val all = listOf(silent, onlyNotHeard, good)
+        val silent = sat("BBB-SILENT")
+        val onlyNotHeard = sat("AAA-NOTHEARD", listOf("Not Heard"))
+        val all = listOf(onlyNotHeard, silent, good)
         val sorted = all.sortedForDisplay(SatStatusSort.BestHeard, all.rateAll(reports))
-        // Not Heard only is worth just more than no data at all, whatever the names say.
-        assertEquals(listOf("GOOD", "BBB-NOTHEARD", "AAA-SILENT"), sorted.map { it.name })
+        // Not Heard is a report, not a reception: it ranks below no data at all, whatever the names say.
+        assertEquals(listOf("GOOD", "BBB-SILENT", "AAA-NOTHEARD"), sorted.map { it.name })
+    }
+
+    @Test
+    fun `best-heard sort puts any voice reception above telemetry only`() {
+        // One heard among many beacons scores lower than a lone beacon, but was still heard.
+        val mostlyBeacon = sat("ZZZ-MIXED", listOf("Heard"), *Array(20) { listOf("Telemetry Only") })
+        val beaconOnly = sat("AAA-BEACON", listOf("Telemetry Only"))
+        val all = listOf(beaconOnly, mostlyBeacon)
+        val sorted = all.sortedForDisplay(SatStatusSort.BestHeard, all.rateAll(reports))
+        assertEquals(listOf("ZZZ-MIXED", "AAA-BEACON"), sorted.map { it.name })
+    }
+
+    @Test
+    fun `conflicting reports alone count as no data`() {
+        assertEquals(SatStatusTier.NoData, sat("ODD", listOf("Something Else")).rate(reports).tier)
     }
 
     @Test
     fun `last-heard sort runs newest first and parks never-reported satellites last`() {
         val fresh = sat("FRESH", listOf("Heard"))
         val older = sat("OLDER", emptyList(), emptyList(), listOf("Telemetry Only"))
-        val never = sat("AAA-NEVER")
-        // Reported on a moment ago, but only as Not Heard: that must not beat a real reception.
-        val notHeard = sat("AAB-NOTHEARD", listOf("Not Heard"))
-        val all = listOf(never, notHeard, older, fresh)
+        val never = sat("AAB-NEVER")
+        // Reported on a moment ago, but only as Not Heard: that ranks below no data at all.
+        val notHeard = sat("AAA-NOTHEARD", listOf("Not Heard"))
+        val all = listOf(notHeard, never, older, fresh)
         val sorted = all.sortedForDisplay(SatStatusSort.LastHeard, all.rateAll(reports))
-        assertEquals(listOf("FRESH", "OLDER", "AAB-NOTHEARD", "AAA-NEVER"), sorted.map { it.name })
+        assertEquals(listOf("FRESH", "OLDER", "AAB-NEVER", "AAA-NOTHEARD"), sorted.map { it.name })
+    }
+
+    @Test
+    fun `last-heard sort keeps a stale reception above a fresh beacon`() {
+        val staleHeard = sat("ZZZ-HEARD", *Array(30) { emptyList<String>() }, listOf("Heard"))
+        val freshBeacon = sat("AAA-BEACON", listOf("Telemetry Only"))
+        val all = listOf(freshBeacon, staleHeard)
+        val sorted = all.sortedForDisplay(SatStatusSort.LastHeard, all.rateAll(reports))
+        assertEquals(listOf("ZZZ-HEARD", "AAA-BEACON"), sorted.map { it.name })
     }
 
     @Test

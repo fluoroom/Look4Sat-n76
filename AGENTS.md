@@ -113,6 +113,10 @@ Look4Sat supports both TLE and OMM (Orbit Mean-Elements Message) CSV formats:
 - Prediction and tracking code reads the time from `AppClock.now()` (`core:domain/utility`), not
   `System.currentTimeMillis()`: it carries the GPS time correction.
 - APRS (AX.25 frames, KISS, Bell 202 modem) lives in `core:domain/aprs/`, pure Kotlin and unit-tested.
+- The Moon is a built-in satellite (`predict/MoonObject.kt`, catnum `MOON_CATNUM` = -301): positioned
+  from the lunar ephemeris, never stored in the database, added by `LocalSource`, with EME radios in
+  `Sources.moonRadios`. It is not `isDeepSpace`, and the pass search neither skips ahead after its
+  LOS nor applies the pass filters to it.
 - N76 radio code (`core:data/framework/N76*.kt`) cannot be tested without the radio. Keep what
   works byte-for-byte; add new radio traffic only behind the option that needs it.
 

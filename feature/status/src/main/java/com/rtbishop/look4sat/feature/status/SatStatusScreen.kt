@@ -59,6 +59,7 @@ import com.rtbishop.look4sat.core.domain.model.SatSlot
 import com.rtbishop.look4sat.core.domain.model.SatStatus
 import com.rtbishop.look4sat.core.domain.utility.SatStatusCategory
 import com.rtbishop.look4sat.core.domain.utility.SatStatusRating
+import com.rtbishop.look4sat.core.domain.utility.SatStatusTier
 import com.rtbishop.look4sat.core.domain.utility.SatStatusSort
 import com.rtbishop.look4sat.core.domain.repository.IContainerProvider
 import com.rtbishop.look4sat.core.presentation.CardButton
@@ -378,7 +379,7 @@ private fun ratingDetail(sort: SatStatusSort, rating: SatStatusRating?): String?
 
 /** Tells "reported, but never as heard" apart from "nobody reported on it at all". */
 private fun noUsableReports(rating: SatStatusRating?): Int =
-    if (rating?.trustTier == 1) R.string.amsat_sort_not_heard else R.string.amsat_sort_no_reports
+    if (rating?.tier == SatStatusTier.NotHeard) R.string.amsat_sort_not_heard else R.string.amsat_sort_no_reports
 
 /** Header: satellite name column + fixed-width date labels aligned to tiles. */
 @Composable
