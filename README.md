@@ -94,23 +94,28 @@ status) report and logs every packet sent and received in raw `CALL>DEST,PATH:te
 ### Transceiver filter categories
 
 Upstream filters transceivers with one flat mode list. This fork replaces that with **filter
-categories**: each category pins a **mode set** to a **band set**, and categories combine as
+categories**: each category pins a **mode set** to a **band set** and, optionally, a list of
+**satellite names**, and categories combine as
 OR-of-ANDs with exclusions subtracted. A transceiver passes when it matches at least one *include*
 category and no *exclude* category.
 
 That makes combinations possible that a flat `modes × bands` filter cannot express:
 
-| Category | Modes | Bands | Mode |
-|---|---|---|---|
-| SSTV | FM, SSTV | V | include |
-| FM repeaters | FM, FMN | V/U | include |
-| Telemetry | BPSK, GMSK | *any* | exclude |
+| Category | Modes | Bands | Names | Mode |
+|---|---|---|---|---|
+| SSTV | FM, SSTV | V | ISS | include |
+| FM repeaters | FM, FMN | V/U | *any* | include |
+| Telemetry | BPSK, GMSK | *any* | *any* | exclude |
 
 A flat filter asked for `{FM, SSTV, FMN} × {V, V/U}` would also admit SSTV-on-V/U and FM-on-V,
 dragging telemetry in. Pinning the band to the mode per category keeps the two buckets separate.
 
 * Band configurations are `{uplink}/{downlink}` letter pairs — `V`, `U`, `L`, `S`, `V/V`, `V/U`,
   `U/V`, `U/U`, `L/V`, `L/U`, `S/V`, `S/U` — derived from each radio's actual frequencies.
+* Satellite names are comma separated and case-insensitive. By default a name matches when the
+  satellite name **includes** it (`ISS` matches `ISS (ZARYA)`); switch on **Exact name match** to
+  require the whole name. A category with only names and no modes or bands keeps or drops those
+  satellites outright.
 * Matching is **per-radio, not per-satellite**: excluding telemetry drops the ISS telemetry
   downlinks while keeping the ISS itself for its FM/SSTV downlink.
 * Categories can be **switched off** without being deleted, so a seasonal filter can be parked.

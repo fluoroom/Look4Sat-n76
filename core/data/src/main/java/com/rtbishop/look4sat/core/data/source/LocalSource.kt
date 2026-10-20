@@ -86,12 +86,17 @@ class LocalSource(private val look4SatDao: Look4SatDao) : ILocalSource {
     override suspend fun getIdsMatchingCategories(categories: List<FilterCategory>): List<Int> {
         val active = categories.filter { it.isActive }
         if (active.isEmpty()) return emptyList()
+        // Names are only fetched when a category asks for them; the Moon is never in the entries table.
+        val names = if (active.any { it.satNames.isNotEmpty() }) {
+            look4SatDao.getEntriesNames() + (MOON_CATNUM to MOON_ORBITAL_DATA.name)
+        } else emptyMap()
         return catnumsMatching { radio ->
             matchesFilterCategories(
                 downlinkMode = radio.downlinkMode,
                 info = radio.info,
                 downlinkLow = radio.downlinkLow,
                 uplinkLow = radio.uplinkLow,
+                satName = names[radio.catnum].orEmpty(),
                 categories = active
             )
         }

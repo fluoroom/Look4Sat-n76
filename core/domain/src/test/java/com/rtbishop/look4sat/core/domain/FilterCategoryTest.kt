@@ -21,8 +21,9 @@ class FilterCategoryTest {
         downlink: Long?,
         uplink: Long?,
         categories: List<FilterCategory>,
-        info: String = ""
-    ) = matchesFilterCategories(mode, info, downlink, uplink, categories)
+        info: String = "",
+        satName: String = "ISS (ZARYA)"
+    ) = matchesFilterCategories(mode, info, downlink, uplink, satName, categories)
 
     @Test
     fun `V-only FM downlink matches the SSTV category`() {
@@ -116,8 +117,32 @@ class FilterCategoryTest {
     }
 
     @Test
+    fun `a name category matches by substring unless exact`() {
+        val iss = FilterCategory("ISS", satNames = listOf("iss"))
+        assertTrue(matches("FM", 437_800_000L, 145_990_000L, listOf(iss)))
+        assertFalse(matches("FM", 437_800_000L, 145_990_000L, listOf(iss.copy(exactNames = true))))
+        assertTrue(matches("FM", 437_800_000L, 145_990_000L, listOf(iss.copy(exactNames = true)), satName = "ISS"))
+        assertFalse(matches("FM", 437_800_000L, 145_990_000L, listOf(iss), satName = "SO-50"))
+    }
+
+    @Test
+    fun `names AND the mode and band of the same category`() {
+        val issSstv = sstv.copy(satNames = listOf("ISS"))
+        assertTrue(matches("FM", 145_800_000L, null, listOf(issSstv)))
+        assertFalse(matches("FM", 145_800_000L, null, listOf(issSstv), satName = "SO-50"))
+        assertFalse(matches("FM", 437_800_000L, 145_990_000L, listOf(issSstv)))
+    }
+
+    @Test
+    fun `an exclude name category drops that satellite only`() {
+        val noIss = FilterCategory("No ISS", satNames = listOf("ISS"), exclude = true)
+        assertFalse(matches("FM", 145_800_000L, null, listOf(noIss)))
+        assertTrue(matches("FM", 145_800_000L, null, listOf(noIss), satName = "SO-50"))
+    }
+
+    @Test
     fun `categories survive a round trip through their stored form`() {
-        val categories = listOf(sstv, fmRepeaters, FilterCategory("Odd, name", exclude = true))
+        val categories = listOf(sstv, fmRepeaters, FilterCategory("Odd, name", exclude = true), FilterCategory("ISS", satNames = listOf("ISS", "SO-50"), exactNames = true))
         assertEquals(categories, decodeFilterCategories(categories.encodeToString()))
         assertNull(decodeFilterCategories(null))
         assertNull(decodeFilterCategories("not json"))

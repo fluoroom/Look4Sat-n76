@@ -206,7 +206,7 @@ class RadarViewModel(
     private suspend fun loadPassData(pass: OrbitalPass, categories: List<FilterCategory>): List<SatRadio> {
         _uiState.update { it.copy(currentPass = pass) }
         val allRadios = satelliteRepo.getRadiosWithId(pass.catNum)
-            .filter { it.matchesFilterCategories(categories) }
+            .filter { it.matchesFilterCategories(pass.orbitalObject.data.name, categories) }
         transponders = allRadios
         val previousUuid = _uiState.value.transceivers.selectedUuid
         val selectedUuid = previousUuid?.takeIf { uuid -> allRadios.any { it.uuid == uuid } }

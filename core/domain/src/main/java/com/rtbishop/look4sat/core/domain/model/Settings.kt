@@ -52,10 +52,18 @@ data class FilterCategory(
     val modes: List<String> = emptyList(),
     val bands: List<String> = emptyList(),
     val exclude: Boolean = false,
-    val enabled: Boolean = true
+    val enabled: Boolean = true,
+    /** Satellite names, any of which must match: substring by default, whole name with [exactNames]. */
+    val satNames: List<String> = emptyList(),
+    val exactNames: Boolean = false
 ) {
     /** A category that constrains nothing is ignored, so an unfinished one can never hide everything. */
-    val isEmpty: Boolean get() = modes.isEmpty() && bands.isEmpty()
+    val isEmpty: Boolean get() = modes.isEmpty() && bands.isEmpty() && satNames.isEmpty()
+
+    /** Case-insensitive; no names means any satellite. */
+    fun matchesName(satName: String): Boolean = satNames.isEmpty() || satNames.any { name ->
+        if (exactNames) satName.equals(name, ignoreCase = true) else satName.contains(name, ignoreCase = true)
+    }
 
     /** Only active categories reach the filter; the rest are kept so they can be switched back on. */
     val isActive: Boolean get() = enabled && !isEmpty

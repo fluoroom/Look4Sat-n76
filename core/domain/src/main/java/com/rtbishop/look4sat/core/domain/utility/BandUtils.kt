@@ -76,15 +76,17 @@ fun SatRadio.matchesTransponderFilter(modes: List<String>, bands: List<String>):
 // so neither a half-filled nor a disabled category can hide everything.
 // Deliberately per-radio, not per-satellite: the ISS has an FM voice downlink *and* telemetry
 // downlinks, so excluding telemetry must drop only that radio, never the whole satellite.
+// [satName] is the name of the satellite the radio belongs to, for the categories' name lists.
 fun matchesFilterCategories(
     downlinkMode: String?,
     info: String,
     downlinkLow: Long?,
     uplinkLow: Long?,
+    satName: String,
     categories: List<FilterCategory>
 ): Boolean {
     if (downlinkLow == null) return false
-    fun matches(category: FilterCategory) = matchesTransponderFilter(
+    fun matches(category: FilterCategory) = category.matchesName(satName) && matchesTransponderFilter(
         downlinkMode, info, downlinkLow, uplinkLow, category.modes, category.bands
     )
     val active = categories.filter { it.isActive }
@@ -94,8 +96,8 @@ fun matchesFilterCategories(
     return excludes.none { matches(it) }
 }
 
-fun SatRadio.matchesFilterCategories(categories: List<FilterCategory>): Boolean =
-    matchesFilterCategories(downlinkMode, info, downlinkLow, uplinkLow, categories)
+fun SatRadio.matchesFilterCategories(satName: String, categories: List<FilterCategory>): Boolean =
+    matchesFilterCategories(downlinkMode, info, downlinkLow, uplinkLow, satName, categories)
 
 // Union of every mode named by the filter, so the picker can still show a mode the DB doesn't list.
 fun List<FilterCategory>.referencedModes(): List<String> = flatMap { it.modes }.distinct()

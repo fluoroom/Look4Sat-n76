@@ -364,7 +364,8 @@ private fun TransponderDialogPreview() {
                 FilterCategory("SSTV", listOf("FM", "SSTV"), listOf("V")),
                 FilterCategory("FM repeaters", listOf("FM", "FMN"), listOf("V/U")),
                 FilterCategory("Telemetry", listOf("BPSK", "GMSK"), emptyList(), exclude = true),
-                FilterCategory("L/S band", listOf("FM"), listOf("L/U", "S/U"), enabled = false)
+                FilterCategory("L/S band", listOf("FM"), listOf("L/U", "S/U"), enabled = false),
+                FilterCategory("ISS", satNames = listOf("ISS"))
             ),
             availableModes = listOf("BPSK", "FM", "FMN", "GMSK", "SSTV"),
             onlyAmSatHeard = true,
@@ -544,7 +545,12 @@ private fun CategoryRow(
                 overflow = TextOverflow.Ellipsis
             )
             Text(
-                text = "${summarize(category.modes, anyLabel)} \u2022 ${summarize(category.bands, anyLabel)}",
+                text = listOfNotNull(
+                    summarize(category.modes, anyLabel),
+                    summarize(category.bands, anyLabel),
+                    category.satNames.takeIf { it.isNotEmpty() }
+                        ?.joinToString(", ", postfix = if (category.exactNames) " (=)" else "")
+                ).joinToString(" \u2022 "),
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = contentAlpha),
                 maxLines = 1,
@@ -586,6 +592,26 @@ private fun CategoryEditor(
         title = stringResource(R.string.pass_transponder_exclude),
         checked = category.exclude,
         onCheckedChange = { onChange(category.copy(exclude = it)) }
+    )
+    // Raw text is kept apart from the parsed list, or the trailing comma of "ISS," would be
+    // trimmed away before the next name could be typed.
+    var namesText by remember { mutableStateOf(category.satNames.joinToString(", ")) }
+    OutlinedTextField(
+        value = namesText,
+        onValueChange = { text ->
+            namesText = text
+            onChange(category.copy(satNames = text.split(',').map { it.trim() }.filter { it.isNotEmpty() }))
+        },
+        label = { Text(text = stringResource(R.string.pass_transponder_sat_names)) },
+        singleLine = true,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = LocalSpacing.current.large)
+    )
+    ToggleRow(
+        title = stringResource(R.string.pass_transponder_exact_names),
+        checked = category.exactNames,
+        onCheckedChange = { onChange(category.copy(exactNames = it)) }
     )
     SectionHeader(stringResource(R.string.pass_transponder_modes))
     LazyVerticalGrid(
