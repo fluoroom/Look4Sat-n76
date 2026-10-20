@@ -22,7 +22,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
-import kotlin.math.cos
 
 class MoonObjectTest {
 
@@ -38,18 +37,16 @@ class MoonObjectTest {
     }
 
     @Test
-    fun `position matches the ephemeris, lowered by the topocentric parallax`() {
+    fun `position matches the topocentric ephemeris`() {
         for (hour in 0 until 48) {
             val time = start + hour * 3_600_000L
-            val geocentric = CelestialComputer.getMoonPosition(observer, time)
-            if (geocentric.elevation !in 5.0..60.0) continue
+            // The ephemeris applies the parallax (0.9-1.0 deg, shrinking with cos(elevation)) as a
+            // closed-form elevation correction; the object gets it from the observer vector maths.
+            val ephemeris = CelestialComputer.getMoonPosition(observer, time)
+            if (ephemeris.elevation !in 5.0..60.0) continue
             val pos = moon.getPosition(observer, time)
-            val elevation = Math.toDegrees(pos.elevation)
-            // Horizontal parallax is 0.9-1.0 deg and shrinks with cos(elevation).
-            val parallax = geocentric.elevation - elevation
-            val expected = cos(Math.toRadians(geocentric.elevation))
-            assertTrue("parallax $parallax at hour $hour", parallax in 0.85 * expected..1.05 * expected)
-            assertEquals(geocentric.azimuth, Math.toDegrees(pos.azimuth), 0.5)
+            assertEquals("elevation at hour $hour", ephemeris.elevation, Math.toDegrees(pos.elevation), 0.05)
+            assertEquals(ephemeris.azimuth, Math.toDegrees(pos.azimuth), 0.5)
             assertTrue(pos.distance in 350_000.0..410_000.0)
         }
     }

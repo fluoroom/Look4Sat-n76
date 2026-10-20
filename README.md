@@ -38,7 +38,7 @@ It is now and always will be completely ad-free and open-source.
 ## This fork
 
 This fork tracks [upstream Look4Sat](https://github.com/rt-bishop/Look4Sat) (currently merged up to
-**v4.4.11**) and adds **direct VGC N76 Bluetooth radio control**, an **APRS** tab, a category-based
+**v4.4.9**) and adds **direct VGC N76 Bluetooth radio control**, an **APRS** tab, a category-based
 transceiver filter, AMSAT status sorting, filters and per-pass icons, GPS position and time sync,
 extra SSTV audio sources, and the Moon as a satellite.
 
@@ -193,6 +193,11 @@ Pick the source in the SSTV control bar before recording.
 on demand rather than being fixed to one mode's line count.
 
 ---
+## Associated projects:
+
+- [Look4Sat-rPi](https://github.com/kampji/Look4Sat-rPi) - An independent Raspberry Pi OS port of Look4Sat,
+bringing satellite tracking to touchscreen devices.
+
 
 ## Star History
 

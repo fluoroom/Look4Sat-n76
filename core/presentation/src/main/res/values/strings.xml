@@ -68,9 +68,8 @@
     <string name="pass_elevation">Elevation: %.1f°</string>
     <string name="pass_deep_space" translatable="false">DeepSpace</string>
     <string name="pass_altitude">Altitude: %d km</string>
-    <string name="pass_aosLos" translatable="false">%03d° - %03d°</string>
+    <string name="pass_aosLos" translatable="false">%03d°/%03d°</string>
     <string name="pass_azimuth" translatable="false">%03d°</string>
-    <string name="pass_duration_placeholder" translatable="false">--m --s</string>
     <string name="pass_timer_aos" translatable="false">AOS %s</string>
     <string name="pass_timer_los" translatable="false">LOS %s</string>
     <string name="pass_empty_list_message">
@@ -86,6 +85,11 @@
         * Transceiver filter: each category can now name satellites (comma separated) next to
         its modes and bands. Names match when the satellite name includes them, or only the whole
         name with Exact name match on. A names-only category keeps or drops those satellites.
+        \n\n* Merged upstream v4.4.9:
+        \n\n* Tweaked SSTV image saving flow, added permissions #264
+        \n\n* Fixed linear Doppler calculator and offset restore #265
+        \n\n* Corrected CelestialComputer moon calculations error #266
+        \n\n* Added Look4Sat-rPi project ref to app Settings/README #267
     </string>
 
     <!-- AMSAT Status screen -->
@@ -179,6 +183,9 @@
 
     <!-- SSTV screen -->
     <string name="sstv_grant_permission">Grant permission</string>
+    <string name="sstv_image_saved">Image saved</string>
+    <string name="sstv_image_save_failed">Failed to save image</string>
+    <string name="sstv_storage_permission_denied">Storage permission is required to save images. If denied permanently, enable it in app settings.</string>
     <string name="sstv_listening">Listening…</string>
     <string name="sstv_mic_permission">Microphone access needed</string>
     <string name="sstv_mode_format">Mode: %s</string>
@@ -313,6 +320,7 @@
     <string name="prefs_outro_title">I would like to say thanks to</string>
     <string name="prefs_outro_thanks" translatable="false">
         * Look4Sat users and contributors!
+        \n* Jill Kamperides (Look4Sat-rPi)
         \n* David A. B. Johnson (predict4java)
         \n* Dave Moten (predict4java)
         \n* Alexandru Csete (Gpredict)
